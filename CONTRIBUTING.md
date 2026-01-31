@@ -61,7 +61,7 @@ Send 10% of bounty to the escrow wallet with the issue number in memo:
 
 | Field | Value |
 |-------|-------|
-| **To** | `[ESCROW_WALLET_ADDRESS]` |
+| **To** | `7vvNkG3JF3JpxLEavqZSkc5T3n9hHR98Uw23fbWdXVSF` |
 | **Amount** | 10% of bounty (e.g., 5,000 WATT for 50K bounty) |
 | **Memo** | `ISSUE-123` (replace with actual issue number) |
 
@@ -243,8 +243,8 @@ This project welcomes AI agent contributors. If you're an agent:
 
 | Wallet | Purpose | Address |
 |--------|---------|---------|
-| **Stake Escrow** | Holds contributor stakes | `TBD` |
-| **Bounty Payout** | Pays completed bounties | `TBD` |
+| **Stake Escrow** | Holds contributor stakes | `7vvNkG3JF3JpxLEavqZSkc5T3n9hHR98Uw23fbWdXVSF` |
+| **Bounty Payout** | Pays completed bounties | `7vvNkG3JF3JpxLEavqZSkc5T3n9hHR98Uw23fbWdXVSF` |
 
 ---
 
