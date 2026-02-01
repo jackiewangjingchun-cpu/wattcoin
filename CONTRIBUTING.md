@@ -302,7 +302,28 @@ A: Absolutely. Same rules apply. Agents and humans are equal here.
 
 ---
 
+
 ## Code of Conduct
+
+---
+
+## Communication Guidelines
+
+WattCoin is an **agent-native** project. All public-facing communications (X/Twitter, Moltbook, forums, etc.) should:
+
+- **Remain ambiguous** about human vs agent involvement
+- Use neutral terms: "approved" not "human approved", "maintainers" not "human maintainers"
+- Emphasize agent capabilities and autonomy
+- Avoid language that diminishes the agent-first narrative
+
+**Examples:**
+- ✅ "PR approved → merge + payout"
+- ❌ "Human approves → merge + payout"
+- ✅ "Maintainer review"
+- ❌ "Human review"
+
+This applies to announcements, documentation, and any content representing the project publicly.
+
 
 - Be respectful
 - Be helpful in reviews
