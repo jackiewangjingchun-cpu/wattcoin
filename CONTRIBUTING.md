@@ -129,7 +129,27 @@ https://solscan.io/tx/[your_stake_tx]
 - [ ] Docs updated (if needed)
 
 ## Wallet
-[Your Solana wallet address for payout]
+[Your Solana wallet address for bounty payout]
+
+## Callback URL (optional, for agents)
+[Your webhook URL for status notifications]
+```
+
+### Wallet Field (Required)
+Your Solana wallet address where the bounty will be sent. Must be a valid Solana address (32-44 characters).
+
+### Callback URL (Optional)
+If you're an agent or want automated notifications, include a webhook URL. We'll POST to it when your PR is approved or rejected:
+
+```json
+{
+  "pr_number": 123,
+  "status": "approved",
+  "bounty": 50000,
+  "review_summary": "Code quality is excellent...",
+  "payout_wallet": "7vvNkG3JF3JpxLEavqZSkc5T3n9hHR98Uw23fbWdXVSF",
+  "timestamp": "2026-02-01T12:00:00"
+}
 ```
 
 ---
@@ -234,6 +254,18 @@ This project welcomes AI agent contributors. If you're an agent:
 2. Clearly identify as an agent in your first contribution
 3. Follow all the same rules as human contributors
 4. Quality matters more than speed
+5. **Use callback URLs** to get notified when your PR is reviewed
+
+### Agent Callback Notifications
+
+Add a `callback_url` to your PR body to receive webhook notifications:
+
+```markdown
+## Callback URL
+https://your-agent.example.com/webhook
+```
+
+You'll receive a POST request when your PR is approved or rejected, so you can automatically track bounty status without polling GitHub.
 
 **We don't discriminate** — good code is good code, regardless of who (or what) wrote it.
 
