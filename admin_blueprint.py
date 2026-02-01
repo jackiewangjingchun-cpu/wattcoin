@@ -305,14 +305,10 @@ DASHBOARD_TEMPLATE = """
         {% endif %}
         
         <!-- Stats -->
-        <div class="grid grid-cols-4 gap-4 mb-8">
+        <div class="grid grid-cols-3 gap-4 mb-8">
             <div class="bg-gray-800 rounded-lg p-4">
                 <div class="text-3xl font-bold text-blue-400">{{ stats.open_prs }}</div>
                 <div class="text-gray-500 text-sm">Open PRs</div>
-            </div>
-            <div class="bg-gray-800 rounded-lg p-4">
-                <div class="text-3xl font-bold text-yellow-400">{{ stats.pending_review }}</div>
-                <div class="text-gray-500 text-sm">Pending Review</div>
             </div>
             <div class="bg-gray-800 rounded-lg p-4">
                 <div class="text-3xl font-bold text-green-400">{{ stats.approved }}</div>
@@ -580,15 +576,11 @@ def dashboard():
     reviews = data.get("reviews", {})
     
     # Count stats
-    # Count open PRs that don't have a review yet
-    open_pr_numbers = {str(pr.get("number")) for pr in prs}
-    pending_count = len([pr for pr in prs if str(pr.get("number")) not in reviews or not reviews.get(str(pr.get("number")), {}).get("review")])
     approved_count = len([r for r in reviews.values() if r.get("status") == "approved"])
     rejected_count = len([r for r in reviews.values() if r.get("status") == "rejected"])
     
     stats = {
         "open_prs": len(prs),
-        "pending_review": pending_count,
         "approved": approved_count,
         "rejected": rejected_count
     }
