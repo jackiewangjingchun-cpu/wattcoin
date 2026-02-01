@@ -120,6 +120,91 @@ def get_pr_detail(pr_number):
         print(f"Error fetching PR {pr_number}: {e}")
         return None
 
+def get_bounty_claims():
+    """Scan GitHub issues for bounty claims."""
+    import re
+    from datetime import datetime, timedelta
+    
+    claims = []
+    
+    try:
+        # Get open issues with bounty label
+        url = f"https://api.github.com/repos/{REPO}/issues?state=open&labels=bounty&per_page=50"
+        resp = requests.get(url, headers=github_headers(), timeout=15)
+        if resp.status_code != 200:
+            return []
+        
+        issues = resp.json()
+        
+        for issue in issues:
+            # Skip PRs (they show up in issues endpoint too)
+            if issue.get("pull_request"):
+                continue
+            
+            issue_number = issue.get("number")
+            issue_title = issue.get("title", "")
+            
+            # Get comments for this issue
+            comments_url = f"https://api.github.com/repos/{REPO}/issues/{issue_number}/comments"
+            comments_resp = requests.get(comments_url, headers=github_headers(), timeout=15)
+            if comments_resp.status_code != 200:
+                continue
+            
+            comments = comments_resp.json()
+            
+            for comment in comments:
+                body = comment.get("body", "").lower()
+                if "claiming" in body or "i claim" in body or "claim this" in body:
+                    claimant = comment.get("user", {}).get("login", "Unknown")
+                    claim_date = comment.get("created_at", "")[:10]
+                    
+                    # Look for stake TX in subsequent comments by same user
+                    stake_tx = None
+                    for c in comments:
+                        if c.get("user", {}).get("login") == claimant:
+                            tx_match = re.search(r'solscan\.io/tx/([A-Za-z0-9]+)', c.get("body", ""))
+                            if tx_match:
+                                stake_tx = tx_match.group(1)
+                                break
+                    
+                    # Calculate status
+                    status = "pending_stake"
+                    if stake_tx:
+                        status = "staked"
+                    
+                    # Check if PR opened (search PRs mentioning this issue)
+                    prs = get_open_prs()
+                    for pr in prs:
+                        pr_body = (pr.get("body") or "").lower()
+                        if f"#{issue_number}" in pr_body or f"closes #{issue_number}" in pr_body:
+                            if pr.get("user", {}).get("login") == claimant:
+                                status = "pr_opened"
+                                break
+                    
+                    # Check expiry (7 days)
+                    if claim_date and status in ["pending_stake", "staked"]:
+                        try:
+                            claim_dt = datetime.fromisoformat(claim_date)
+                            if datetime.now() - claim_dt > timedelta(days=7):
+                                status = "expired"
+                        except:
+                            pass
+                    
+                    claims.append({
+                        "issue_number": issue_number,
+                        "issue_title": issue_title,
+                        "claimant": claimant,
+                        "claim_date": claim_date,
+                        "stake_tx": stake_tx,
+                        "status": status
+                    })
+                    break  # Only first claim per issue
+        
+        return claims
+    except Exception as e:
+        print(f"Error fetching claims: {e}")
+        return []
+
 def extract_bounty_amount(title="", body="", labels=None):
     """Extract bounty amount from PR title, body, or labels (in priority order)."""
     import re
@@ -397,11 +482,16 @@ DASHBOARD_TEMPLATE = """
         </div>
         {% endif %}
         
-        <!-- Payout Queue Link -->
+        <!-- Navigation Links -->
         <div class="mt-8 pt-6 border-t border-gray-700 flex justify-between items-center">
-            <a href="{{ url_for('admin.payouts') }}" class="text-green-400 hover:text-green-300">
-                View Payout Queue →
-            </a>
+            <div class="flex gap-6">
+                <a href="{{ url_for('admin.payouts') }}" class="text-green-400 hover:text-green-300">
+                    💰 Payout Queue
+                </a>
+                <a href="{{ url_for('admin.claims') }}" class="text-blue-400 hover:text-blue-300">
+                    🎯 Bounty Claims
+                </a>
+            </div>
             <button onclick="confirmClear()" class="text-xs text-gray-500 hover:text-red-400 transition">
                 🗑️ Clear All Data
             </button>
@@ -636,6 +726,97 @@ PAYOUTS_TEMPLATE = """
 </html>
 """
 
+CLAIMS_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bounty Claims - WattCoin Admin</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+    <div class="max-w-5xl mx-auto p-6">
+        <a href="{{ url_for('admin.dashboard') }}" class="text-gray-500 hover:text-gray-300 text-sm mb-4 inline-block">
+            ← Back to Dashboard
+        </a>
+        
+        <h1 class="text-2xl font-bold text-green-400 mb-6">🎯 Bounty Claims</h1>
+        
+        {% if claims %}
+        <div class="bg-gray-800 rounded-lg overflow-hidden">
+            <table class="w-full">
+                <thead class="bg-gray-700">
+                    <tr>
+                        <th class="px-4 py-3 text-left text-sm">Issue</th>
+                        <th class="px-4 py-3 text-left text-sm">Claimant</th>
+                        <th class="px-4 py-3 text-left text-sm">Date</th>
+                        <th class="px-4 py-3 text-left text-sm">Stake TX</th>
+                        <th class="px-4 py-3 text-left text-sm">Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for claim in claims %}
+                    <tr class="border-t border-gray-700">
+                        <td class="px-4 py-3">
+                            <a href="https://github.com/{{ repo }}/issues/{{ claim.issue_number }}" 
+                               target="_blank" class="text-blue-400 hover:underline">
+                                #{{ claim.issue_number }}
+                            </a>
+                            <div class="text-xs text-gray-500 truncate max-w-[200px]">{{ claim.issue_title }}</div>
+                        </td>
+                        <td class="px-4 py-3">
+                            <a href="https://github.com/{{ claim.claimant }}" target="_blank" class="hover:text-blue-400">
+                                {{ claim.claimant }}
+                            </a>
+                        </td>
+                        <td class="px-4 py-3 text-sm text-gray-400">{{ claim.claim_date }}</td>
+                        <td class="px-4 py-3">
+                            {% if claim.stake_tx %}
+                            <a href="https://solscan.io/tx/{{ claim.stake_tx }}" target="_blank" 
+                               class="text-xs text-green-400 hover:underline">
+                                {{ claim.stake_tx[:8] }}...
+                            </a>
+                            {% else %}
+                            <span class="text-xs text-gray-500">—</span>
+                            {% endif %}
+                        </td>
+                        <td class="px-4 py-3">
+                            <span class="px-2 py-1 rounded text-xs 
+                                {% if claim.status == 'pending_stake' %}bg-yellow-900/50 text-yellow-400
+                                {% elif claim.status == 'staked' %}bg-blue-900/50 text-blue-400
+                                {% elif claim.status == 'pr_opened' %}bg-green-900/50 text-green-400
+                                {% elif claim.status == 'expired' %}bg-red-900/50 text-red-400
+                                {% endif %}">
+                                {% if claim.status == 'pending_stake' %}Pending Stake
+                                {% elif claim.status == 'staked' %}Staked
+                                {% elif claim.status == 'pr_opened' %}PR Opened
+                                {% elif claim.status == 'expired' %}Expired
+                                {% endif %}
+                            </span>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="bg-gray-800 rounded-lg p-8 text-center text-gray-500">
+            No bounty claims found
+        </div>
+        {% endif %}
+        
+        <div class="mt-6 p-4 bg-gray-800 rounded-lg">
+            <p class="text-sm text-gray-500">
+                Claims are detected by scanning issue comments for "Claiming" keyword.
+                Status updates when stake TX is posted or PR references the issue.
+            </p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
 # =============================================================================
 # ROUTES
 # =============================================================================
@@ -861,6 +1042,16 @@ def payouts():
     
     return render_template_string(PAYOUTS_TEMPLATE,
         payouts=payout_list,
+        repo=REPO
+    )
+
+@admin_bp.route('/claims')
+@login_required
+def claims():
+    """Bounty claims page."""
+    claim_list = get_bounty_claims()
+    return render_template_string(CLAIMS_TEMPLATE,
+        claims=claim_list,
         repo=REPO
     )
 
