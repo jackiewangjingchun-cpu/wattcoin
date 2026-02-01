@@ -145,6 +145,24 @@ def extract_callback_url(body):
         return match.group(1).strip()
     return None
 
+def extract_wallet(body):
+    """Extract Solana wallet address from PR body."""
+    import re
+    if not body:
+        return None
+    # Look for wallet in ## Wallet section or wallet: <address>
+    # Solana addresses are base58, typically 32-44 chars
+    patterns = [
+        r'##\s*Wallet[:\s]*\n*\s*([1-9A-HJ-NP-Za-km-z]{32,44})',  # ## Wallet section
+        r'wallet[:\s=]+\s*([1-9A-HJ-NP-Za-km-z]{32,44})',  # wallet: <address>
+        r'\b([1-9A-HJ-NP-Za-km-z]{43,44})\b'  # Raw Solana address (43-44 chars typical)
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, body, re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+    return None
+
 def send_callback(callback_url, payload):
     """Send callback notification to agent. Fail silently."""
     if not callback_url:
@@ -481,7 +499,7 @@ PAYOUTS_TEMPLATE = """
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-900 text-gray-100 min-h-screen">
-    <div class="max-w-4xl mx-auto p-6">
+    <div class="max-w-5xl mx-auto p-6">
         <a href="{{ url_for('admin.dashboard') }}" class="text-gray-500 hover:text-gray-300 text-sm mb-4 inline-block">
             ← Back to Dashboard
         </a>
@@ -497,6 +515,7 @@ PAYOUTS_TEMPLATE = """
                         <th class="px-4 py-3 text-left text-sm">Contributor</th>
                         <th class="px-4 py-3 text-left text-sm">Amount</th>
                         <th class="px-4 py-3 text-left text-sm">Status</th>
+                        <th class="px-4 py-3 text-left text-sm">Action</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -508,8 +527,15 @@ PAYOUTS_TEMPLATE = """
                                 #{{ payout.pr_number }}
                             </a>
                         </td>
-                        <td class="px-4 py-3">{{ payout.author }}</td>
-                        <td class="px-4 py-3 text-green-400">{{ payout.amount }} WATT</td>
+                        <td class="px-4 py-3">
+                            {{ payout.author }}
+                            {% if payout.wallet %}
+                            <div class="text-xs text-gray-500 truncate max-w-[150px]" title="{{ payout.wallet }}">
+                                {{ payout.wallet[:8] }}...{{ payout.wallet[-4:] }}
+                            </div>
+                            {% endif %}
+                        </td>
+                        <td class="px-4 py-3 text-green-400 font-mono">{{ "{:,}".format(payout.amount) }} WATT</td>
                         <td class="px-4 py-3">
                             <span class="px-2 py-1 rounded text-xs 
                                 {% if payout.status == 'pending' %}bg-yellow-900/50 text-yellow-400
@@ -517,6 +543,18 @@ PAYOUTS_TEMPLATE = """
                                 {% endif %}">
                                 {{ payout.status }}
                             </span>
+                        </td>
+                        <td class="px-4 py-3">
+                            {% if payout.status == 'pending' and payout.wallet %}
+                            <a href="solana:{{ payout.wallet }}?amount={{ payout.amount }}&spl-token=Gpmbh4PoQnL1kNgpMYDED3iv4fczcr7d3qNBLf8rpump&label=WattCoin%20Bounty&message=PR%23{{ payout.pr_number }}"
+                               class="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 rounded text-sm font-medium transition inline-flex items-center gap-1">
+                                👻 Pay {{ "{:,}".format(payout.amount) }}
+                            </a>
+                            {% elif payout.status == 'pending' and not payout.wallet %}
+                            <span class="text-xs text-red-400">No wallet</span>
+                            {% else %}
+                            <span class="text-xs text-gray-500">—</span>
+                            {% endif %}
                         </td>
                     </tr>
                     {% endfor %}
@@ -529,7 +567,7 @@ PAYOUTS_TEMPLATE = """
                 <strong>Bounty Wallet:</strong> 7vvNkG3JF3JpxLEavqZSkc5T3n9hHR98Uw23fbWdXVSF
             </p>
             <p class="text-sm text-gray-500 mt-2">
-                Send payouts manually via Phantom or CLI. Mark as paid in the database after sending.
+                Click "Pay" to open Phantom with pre-filled transaction. Token: WATT (Gpmbh4...rpump)
             </p>
         </div>
         {% else %}
@@ -663,10 +701,12 @@ def approve_pr(pr_number):
             
             # Add to payout queue
             if pr:
+                recipient_wallet = extract_wallet(pr.get("body", ""))
                 data["payouts"].append({
                     "pr_number": pr_number,
                     "author": pr["author"],
                     "amount": bounty,
+                    "wallet": recipient_wallet,
                     "status": "pending",
                     "approved_at": datetime.now().isoformat()
                 })
