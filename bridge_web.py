@@ -50,8 +50,10 @@ CORS(app, origins=[
 # =============================================================================
 from admin_blueprint import admin_bp
 from api_bounties import bounties_bp
+from api_llm import llm_bp
 app.register_blueprint(admin_bp)
 app.register_blueprint(bounties_bp)
+app.register_blueprint(llm_bp)
 
 # =============================================================================
 # API CLIENTS
