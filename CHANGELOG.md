@@ -1,4 +1,25 @@
 ## [February 3, 2026] - [UTC]
+- **Action**: Major feature release
+- **Version**: v2.1.0
+- **Files**: api_nodes.py (new), bridge_web.py
+- **Summary**: WattNode Network - Distributed Compute
+  - New node registration system with stake verification (10,000 WATT)
+  - Nodes earn 70% of job payments, 20% treasury, 10% burn
+  - Scraper endpoint routes to active nodes first, centralized fallback
+  - Treasury wallet: Atu5phbGGGFogbKhi259czz887dSdTfXwJxwbuE5aF5q
+  - New endpoints:
+    - `POST /api/v1/nodes/register` - Register new node
+    - `POST /api/v1/nodes/heartbeat` - Keep node alive
+    - `GET /api/v1/nodes/jobs` - Poll for available jobs
+    - `POST /api/v1/nodes/jobs/{id}/claim` - Claim a job
+    - `POST /api/v1/nodes/jobs/{id}/complete` - Submit result
+    - `GET /api/v1/nodes` - List active nodes (public)
+    - `GET /api/v1/nodes/{id}` - Node stats (public)
+  - Storage: data/nodes.json, data/node_jobs.json
+  - Health endpoint now shows active_nodes count
+- **Requested by**: Chris
+
+## [February 3, 2026] - [UTC]
 - **Action**: Feature release
 - **Version**: v1.9.0
 - **Files**: bridge_web.py, skills/wattcoin/wattcoin.py, skills/wattcoin/SKILL.md
