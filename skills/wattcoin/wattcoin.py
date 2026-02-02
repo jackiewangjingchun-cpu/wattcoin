@@ -23,6 +23,7 @@ API_BASE = "https://wattcoin-production-81a7.up.railway.app"
 BOUNTY_WALLET = "7vvNkG3JF3JpxLEavqZSkc5T3n9hHR98Uw23fbWdXVSF"
 SOLANA_RPC = "https://solana.publicnode.com"
 LLM_PRICE = 500  # WATT per query
+SCRAPE_PRICE = 100  # WATT per scrape
 WATT_DECIMALS = 6
 
 # =============================================================================
@@ -223,18 +224,33 @@ def watt_query(prompt: str) -> Dict[str, Any]:
 
 def watt_scrape(url: str, format: str = "text") -> Dict[str, Any]:
     """
-    Scrape URL via WattCoin API.
+    Scrape URL via WattCoin API. Auto-sends 100 WATT payment.
     
     Args:
         url: URL to scrape
         format: 'text', 'html', or 'json'
         
     Returns:
-        Dict with 'content', 'title', 'url', etc.
+        Dict with 'content', 'url', 'watt_charged', etc.
     """
+    # Step 1: Send payment
+    tx_sig = watt_send(BOUNTY_WALLET, SCRAPE_PRICE)
+    
+    # Step 2: Wait for confirmation
+    import time
+    time.sleep(3)
+    
+    # Step 3: Call scraper API with payment proof
+    wallet = get_wallet_address()
+    
     resp = requests.post(
         f"{API_BASE}/api/v1/scrape",
-        json={"url": url, "format": format},
+        json={
+            "url": url,
+            "format": format,
+            "wallet": wallet,
+            "tx_signature": tx_sig
+        },
         timeout=30
     )
     
