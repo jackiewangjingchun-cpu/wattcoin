@@ -1,5 +1,19 @@
 ## [February 2, 2026] - [UTC]
 - **Action**: Feature release
+- **Version**: v1.5.0
+- **Files**: api_reputation.py (new), bridge_web.py, Leaderboard.jsx (wattcoin-web)
+- **Summary**: Reputation System v0
+  - `GET /api/v1/reputation` - List all contributors with tiers
+  - `GET /api/v1/reputation/<github>` - Single contributor data
+  - `GET /api/v1/reputation/stats` - Overall stats
+  - Tier system: 🥉 Bronze (1+ bounty), 🥈 Silver (3+ or 100K), 🥇 Gold (5+ & 250K)
+  - Leaderboard fetches from Reputation API
+  - Stats cards: Contributors, Bounties Paid, WATT Distributed
+  - Tier badges and legend on Leaderboard page
+- **Requested by**: Chris - Issue #14 (Reputation system)
+
+## [February 2, 2026] - [UTC]
+- **Action**: Feature release
 - **Version**: v1.4.0
 - **Files**: api_llm.py (new), bridge_web.py
 - **Summary**: LLM Proxy - Pay WATT for Grok queries
