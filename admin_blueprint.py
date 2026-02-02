@@ -1162,8 +1162,14 @@ API_KEYS_TEMPLATE = """
                 </div>
                 <div>
                     <label class="block text-sm text-gray-400 mb-1">TX Signature</label>
-                    <input type="text" name="tx_sig" placeholder="Payment TX (optional)" 
-                           class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm focus:border-green-500 focus:outline-none">
+                    <div class="flex gap-2">
+                        <input type="text" name="tx_sig" id="tx_sig_input" placeholder="Payment TX (optional)" 
+                               class="flex-1 bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm focus:border-green-500 focus:outline-none">
+                        <button type="button" onclick="verifyTx()" 
+                                class="px-3 py-2 bg-blue-600 hover:bg-blue-700 rounded text-sm font-medium transition whitespace-nowrap">
+                            🔍 Verify
+                        </button>
+                    </div>
                 </div>
                 <button type="submit" class="px-4 py-2 bg-green-600 hover:bg-green-700 rounded text-sm font-medium transition">
                     + Create Key
@@ -1278,6 +1284,15 @@ API_KEYS_TEMPLATE = """
                 toast.classList.add('show');
                 setTimeout(() => toast.classList.remove('show'), 3000);
             });
+        }
+        
+        function verifyTx() {
+            const txSig = document.getElementById('tx_sig_input').value.trim();
+            if (!txSig) {
+                alert('Enter a TX signature first');
+                return;
+            }
+            window.open('https://solscan.io/tx/' + txSig, '_blank');
         }
     </script>
 </body>
