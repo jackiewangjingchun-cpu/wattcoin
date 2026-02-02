@@ -1,6 +1,6 @@
 """
 WattNode API - Node registration, job routing, payouts
-v2.1.0
+v2.1.1 - Auto-payout added
 """
 
 from flask import Blueprint, request, jsonify
@@ -9,6 +9,7 @@ import json
 import time
 import uuid
 import requests
+import base58
 from datetime import datetime, timezone
 
 nodes_bp = Blueprint('nodes', __name__)
@@ -19,6 +20,7 @@ JOBS_FILE = os.environ.get('JOBS_FILE', '/app/data/node_jobs.json')
 WATT_MINT = "Gpmbh4PoQnL1kNgpMYDED3iv4fczcr7d3qNBLf8rpump"
 BOUNTY_WALLET = "7vvNkG3JF3JpxLEavqZSkc5T3n9hHR98Uw23fbWdXVSF"
 TREASURY_WALLET = os.environ.get('TREASURY_WALLET', 'Atu5phbGGGFogbKhi259czz887dSdTfXwJxwbuE5aF5q')
+TREASURY_WALLET_PRIVATE_KEY = os.environ.get('TREASURY_WALLET_PRIVATE_KEY', '')
 SOLANA_RPC = "https://solana.publicnode.com"
 
 STAKE_AMOUNT = 10000  # 10,000 WATT required
@@ -109,6 +111,110 @@ def verify_stake(wallet: str, tx_signature: str) -> dict:
         
     except Exception as e:
         return {"valid": False, "error": str(e)}
+
+# === Node Payout ===
+def send_node_payout(to_wallet: str, amount: int) -> tuple:
+    """
+    Send WATT tokens from treasury wallet to node.
+    Returns: (success, tx_signature or error_message)
+    """
+    if not TREASURY_WALLET_PRIVATE_KEY:
+        return False, "TREASURY_WALLET_PRIVATE_KEY not configured"
+    
+    try:
+        from solders.keypair import Keypair
+        from solders.pubkey import Pubkey
+        from solders.instruction import Instruction, AccountMeta
+        from solders.transaction import Transaction
+        from solders.message import Message
+        from solders.hash import Hash
+        import struct
+        
+        # Token-2022 program ID (WATT uses Token-2022)
+        TOKEN_2022_PROGRAM_ID = Pubkey.from_string("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")
+        
+        # Load treasury wallet from private key
+        key_bytes = base58.b58decode(TREASURY_WALLET_PRIVATE_KEY)
+        wallet = Keypair.from_bytes(key_bytes)
+        
+        mint = Pubkey.from_string(WATT_MINT)
+        from_pubkey = wallet.pubkey()
+        to_pubkey = Pubkey.from_string(to_wallet)
+        
+        # Get ATAs via RPC
+        def get_ata_for_owner(owner_str):
+            resp = requests.post(SOLANA_RPC, json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "getTokenAccountsByOwner",
+                "params": [owner_str, {"mint": WATT_MINT}, {"encoding": "jsonParsed"}]
+            }, timeout=15)
+            data = resp.json()
+            accounts = data.get("result", {}).get("value", [])
+            if accounts:
+                return Pubkey.from_string(accounts[0]["pubkey"])
+            return None
+        
+        from_ata = get_ata_for_owner(str(from_pubkey))
+        to_ata = get_ata_for_owner(to_wallet)
+        
+        if not from_ata:
+            return False, "Treasury wallet has no WATT token account"
+        if not to_ata:
+            return False, f"Node wallet {to_wallet[:8]}... has no WATT token account"
+        
+        # Build transfer instruction (opcode 3 for SPL token transfer)
+        amount_raw = amount * (10 ** 6)  # 6 decimals
+        instruction_data = struct.pack('<BQ', 3, amount_raw)
+        
+        # Account metas for transfer: [source, dest, owner]
+        accounts = [
+            AccountMeta(from_ata, is_signer=False, is_writable=True),
+            AccountMeta(to_ata, is_signer=False, is_writable=True),
+            AccountMeta(from_pubkey, is_signer=True, is_writable=False),
+        ]
+        
+        transfer_ix = Instruction(TOKEN_2022_PROGRAM_ID, instruction_data, accounts)
+        
+        # Get recent blockhash
+        rpc_resp = requests.post(SOLANA_RPC, json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "getLatestBlockhash",
+            "params": [{"commitment": "finalized"}]
+        }, timeout=15)
+        blockhash_data = rpc_resp.json()
+        blockhash = Hash.from_string(blockhash_data["result"]["value"]["blockhash"])
+        
+        # Build and sign transaction
+        msg = Message.new_with_blockhash([transfer_ix], from_pubkey, blockhash)
+        tx = Transaction.new_unsigned(msg)
+        tx.sign([wallet], blockhash)
+        
+        # Serialize and send
+        tx_bytes = bytes(tx)
+        tx_base64 = base58.b58encode(tx_bytes).decode('utf-8')
+        
+        send_resp = requests.post(SOLANA_RPC, json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "sendTransaction",
+            "params": [tx_base64, {"encoding": "base58", "skipPreflight": False}]
+        }, timeout=30)
+        
+        send_result = send_resp.json()
+        
+        if "result" in send_result:
+            return True, send_result["result"]
+        elif "error" in send_result:
+            return False, f"RPC error: {send_result['error'].get('message', str(send_result['error']))}"
+        else:
+            return False, "Unknown RPC response"
+            
+    except ImportError as e:
+        return False, f"Solana libraries not installed: {e}"
+    except Exception as e:
+        return False, f"Payout error: {e}"
 
 # === Node Helpers ===
 def generate_node_id():
@@ -369,22 +475,46 @@ def complete_job(job_id):
     # Update node stats
     nodes_data = load_nodes()
     node = nodes_data.get("nodes", {}).get(node_id)
+    node_wallet = None
     if node:
         node["jobs_completed"] = node.get("jobs_completed", 0) + 1
         node["total_earned"] = node.get("total_earned", 0) + job.get("node_reward", 0)
         node["last_heartbeat"] = now
+        node_wallet = node.get("wallet")
         save_nodes(nodes_data)
     
-    # TODO: Auto-payout to node wallet (same as task payout)
-    # For now, mark as pending_payout
+    # Auto-payout to node wallet
+    payout_status = "pending"
+    payout_tx = None
+    payout_error = None
     
-    return jsonify({
+    if node_wallet and job.get("node_reward", 0) > 0:
+        success, result_msg = send_node_payout(node_wallet, job.get("node_reward"))
+        if success:
+            payout_status = "paid"
+            payout_tx = result_msg
+            # Update job with payout info
+            jobs_data = load_jobs()
+            jobs_data["jobs"][job_id]["payout_status"] = "paid"
+            jobs_data["jobs"][job_id]["payout_tx"] = payout_tx
+            save_jobs(jobs_data)
+        else:
+            payout_error = result_msg
+    
+    response = {
         "success": True,
         "job_id": job_id,
         "status": "completed",
         "reward": job.get("node_reward"),
-        "payout_status": "pending"  # Will be "paid" after payout implemented
-    })
+        "payout_status": payout_status
+    }
+    
+    if payout_tx:
+        response["payout_tx"] = payout_tx
+    if payout_error:
+        response["payout_error"] = payout_error
+    
+    return jsonify(response)
 
 @nodes_bp.route('/api/v1/nodes', methods=['GET'])
 def list_nodes():
