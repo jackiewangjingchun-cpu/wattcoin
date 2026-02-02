@@ -55,7 +55,7 @@ CORS(app, origins=[
 # =============================================================================
 from admin_blueprint import admin_bp
 from api_bounties import bounties_bp
-from api_llm import llm_bp, verify_watt_payment, load_used_signatures, save_used_signatures
+from api_llm import llm_bp, verify_watt_payment, save_used_signature
 from api_reputation import reputation_bp
 from api_tasks import tasks_bp
 app.register_blueprint(admin_bp)
@@ -701,14 +701,7 @@ def scrape():
             }), 400
         
         # Mark signature as used
-        used_sigs = load_used_signatures()
-        used_sigs[tx_signature] = {
-            'wallet': wallet,
-            'amount': SCRAPE_PRICE_WATT,
-            'service': 'scrape',
-            'used_at': datetime.utcnow().isoformat() + 'Z'
-        }
-        save_used_signatures(used_sigs)
+        save_used_signature(tx_signature)
         payment_verified = True
 
     headers = {
