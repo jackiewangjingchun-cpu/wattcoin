@@ -252,9 +252,7 @@ def verify_watt_payment(tx_signature, expected_wallet, expected_amount):
     if sender_change > -expected_amount + 0.01:  # Should be negative (sent out)
         return False, "wallet_mismatch", f"Expected wallet didn't send {expected_amount} WATT"
     
-    # All checks passed - mark signature as used
-    save_used_signature(tx_signature)
-    
+    # All checks passed - signature will be marked as used after successful API call
     return True, None, None
 
 # =============================================================================
@@ -379,6 +377,9 @@ def llm_query():
             "error": "model_unavailable",
             "message": model_error
         }), 503
+    
+    # Success - now mark TX as used (prevents replay)
+    save_used_signature(tx_signature)
     
     # Increment rate limit
     increment_rate_limit(wallet)
