@@ -491,6 +491,10 @@ DASHBOARD_TEMPLATE = """
                class="px-4 py-2 text-sm font-medium border-b-2 border-green-400 text-green-400">
                 🎯 Bounties
             </a>
+            <a href="{{ url_for('admin.submissions') }}" 
+               class="px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200">
+                📋 Submissions
+            </a>
             <a href="{{ url_for('admin.api_keys') }}" 
                class="px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200">
                 🔑 API Keys
@@ -1118,6 +1122,10 @@ API_KEYS_TEMPLATE = """
                class="px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200">
                 🎯 Bounties
             </a>
+            <a href="{{ url_for('admin.submissions') }}" 
+               class="px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200">
+                📋 Submissions
+            </a>
             <a href="{{ url_for('admin.api_keys') }}" 
                class="px-4 py-2 text-sm font-medium border-b-2 border-green-400 text-green-400">
                 🔑 API Keys
@@ -1652,3 +1660,356 @@ def clear_data():
     """Clear all reviews and payouts data."""
     save_data({"reviews": {}, "payouts": []})
     return redirect(url_for('admin.dashboard', message="All data cleared successfully"))
+
+# =============================================================================
+# SUBMISSIONS PAGE
+# =============================================================================
+
+SUBMISSIONS_FILE = "/app/data/task_submissions.json"
+
+def load_submissions():
+    """Load task submissions."""
+    try:
+        with open(SUBMISSIONS_FILE, 'r') as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {"submissions": []}
+
+def save_submissions(data):
+    """Save task submissions."""
+    try:
+        os.makedirs(os.path.dirname(SUBMISSIONS_FILE), exist_ok=True)
+        with open(SUBMISSIONS_FILE, 'w') as f:
+            json.dump(data, f, indent=2)
+        return True
+    except:
+        return False
+
+SUBMISSIONS_HTML = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Task Submissions - WattCoin Admin</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background: #0a0a0a; color: #e5e5e5; }
+        .truncate-id { max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    </style>
+</head>
+<body class="p-8">
+    <div class="max-w-6xl mx-auto">
+        <!-- Header -->
+        <div class="flex justify-between items-center mb-4">
+            <div>
+                <h1 class="text-2xl font-bold text-green-400">⚡ WattCoin Admin</h1>
+                <p class="text-gray-500 text-sm">v1.8.0 | Task Submissions</p>
+            </div>
+            <a href="{{ url_for('admin.logout') }}" class="text-gray-400 hover:text-red-400 text-sm">Logout</a>
+        </div>
+        
+        <!-- Nav Tabs -->
+        <div class="flex gap-1 mb-6 border-b border-gray-700">
+            <a href="{{ url_for('admin.dashboard') }}" 
+               class="px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200">
+                🎯 Bounties
+            </a>
+            <a href="{{ url_for('admin.submissions') }}" 
+               class="px-4 py-2 text-sm font-medium border-b-2 border-green-400 text-green-400">
+                📋 Submissions
+            </a>
+            <a href="{{ url_for('admin.api_keys') }}" 
+               class="px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200">
+                🔑 API Keys
+            </a>
+        </div>
+        
+        {% if message %}
+        <div class="bg-green-900/50 border border-green-500 text-green-300 px-4 py-2 rounded mb-6">{{ message }}</div>
+        {% endif %}
+        
+        {% if error %}
+        <div class="bg-red-900/50 border border-red-500 text-red-300 px-4 py-2 rounded mb-6">{{ error }}</div>
+        {% endif %}
+        
+        <!-- Stats -->
+        <div class="grid grid-cols-4 gap-4 mb-8">
+            <div class="bg-gray-800 rounded-lg p-4">
+                <div class="text-3xl font-bold text-yellow-400">{{ stats.pending }}</div>
+                <div class="text-gray-500 text-sm">Pending Review</div>
+            </div>
+            <div class="bg-gray-800 rounded-lg p-4">
+                <div class="text-3xl font-bold text-blue-400">{{ stats.approved }}</div>
+                <div class="text-gray-500 text-sm">Approved</div>
+            </div>
+            <div class="bg-gray-800 rounded-lg p-4">
+                <div class="text-3xl font-bold text-green-400">{{ stats.paid }}</div>
+                <div class="text-gray-500 text-sm">Paid</div>
+            </div>
+            <div class="bg-gray-800 rounded-lg p-4">
+                <div class="text-3xl font-bold text-red-400">{{ stats.rejected }}</div>
+                <div class="text-gray-500 text-sm">Rejected</div>
+            </div>
+        </div>
+        
+        <!-- Pending Submissions -->
+        {% if pending %}
+        <div class="bg-gray-900 rounded-lg p-6 mb-6">
+            <h2 class="text-lg font-bold text-yellow-400 mb-4">⏳ Pending Review ({{ pending|length }})</h2>
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="text-gray-500 border-b border-gray-700">
+                        <th class="text-left pb-2">ID</th>
+                        <th class="text-left pb-2">Task</th>
+                        <th class="text-left pb-2">Wallet</th>
+                        <th class="text-right pb-2">Amount</th>
+                        <th class="text-left pb-2">Grok</th>
+                        <th class="text-left pb-2">Submitted</th>
+                        <th class="text-right pb-2">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for sub in pending %}
+                    <tr class="border-b border-gray-800">
+                        <td class="py-3 font-mono text-xs truncate-id" title="{{ sub.id }}">{{ sub.id }}</td>
+                        <td class="py-3">
+                            <a href="https://github.com/WattCoin-Org/wattcoin/issues/{{ sub.task_id }}" 
+                               target="_blank" class="text-blue-400 hover:underline">
+                                #{{ sub.task_id }}
+                            </a>
+                            <span class="text-gray-500">{{ sub.task_title[:30] }}...</span>
+                        </td>
+                        <td class="py-3 font-mono text-xs">{{ sub.wallet[:8] }}...</td>
+                        <td class="py-3 text-right text-green-400">{{ "{:,}".format(sub.amount) }} WATT</td>
+                        <td class="py-3">
+                            {% if sub.grok_review %}
+                                {% if sub.grok_review.pass %}
+                                    <span class="text-green-400">✓ {{ (sub.grok_review.confidence * 100)|int }}%</span>
+                                {% else %}
+                                    <span class="text-red-400">✗ {{ (sub.grok_review.confidence * 100)|int }}%</span>
+                                {% endif %}
+                            {% else %}
+                                <span class="text-gray-500">-</span>
+                            {% endif %}
+                        </td>
+                        <td class="py-3 text-gray-500 text-xs">{{ sub.submitted_at[:10] }}</td>
+                        <td class="py-3 text-right">
+                            <form action="{{ url_for('admin.approve_submission', sub_id=sub.id) }}" method="POST" class="inline">
+                                <button type="submit" class="px-3 py-1 bg-green-600 hover:bg-green-700 rounded text-xs mr-1">
+                                    ✓ Approve
+                                </button>
+                            </form>
+                            <form action="{{ url_for('admin.reject_submission', sub_id=sub.id) }}" method="POST" class="inline">
+                                <button type="submit" class="px-3 py-1 bg-red-600 hover:bg-red-700 rounded text-xs">
+                                    ✗ Reject
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                    <tr class="border-b border-gray-800 bg-gray-800/30">
+                        <td colspan="7" class="py-2 px-4">
+                            <details class="text-xs">
+                                <summary class="cursor-pointer text-gray-400 hover:text-gray-200">View result</summary>
+                                <pre class="mt-2 p-2 bg-black rounded overflow-x-auto text-green-400">{{ sub.result | tojson(indent=2) }}</pre>
+                                {% if sub.grok_review and sub.grok_review.reason %}
+                                <p class="mt-2 text-gray-400"><strong>Grok:</strong> {{ sub.grok_review.reason }}</p>
+                                {% endif %}
+                            </details>
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+        
+        <!-- Payout History -->
+        <div class="bg-gray-900 rounded-lg p-6">
+            <h2 class="text-lg font-bold text-green-400 mb-4">💰 Payout History ({{ paid|length }})</h2>
+            {% if paid %}
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="text-gray-500 border-b border-gray-700">
+                        <th class="text-left pb-2">Task</th>
+                        <th class="text-left pb-2">Wallet</th>
+                        <th class="text-right pb-2">Amount</th>
+                        <th class="text-left pb-2">TX</th>
+                        <th class="text-left pb-2">Paid At</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for sub in paid %}
+                    <tr class="border-b border-gray-800">
+                        <td class="py-3">
+                            <a href="https://github.com/WattCoin-Org/wattcoin/issues/{{ sub.task_id }}" 
+                               target="_blank" class="text-blue-400 hover:underline">
+                                #{{ sub.task_id }}
+                            </a>
+                            {{ sub.task_title[:25] }}...
+                        </td>
+                        <td class="py-3 font-mono text-xs">{{ sub.wallet[:12] }}...</td>
+                        <td class="py-3 text-right text-green-400">{{ "{:,}".format(sub.amount) }} WATT</td>
+                        <td class="py-3">
+                            {% if sub.tx_signature %}
+                            <a href="https://solscan.io/tx/{{ sub.tx_signature }}" target="_blank" 
+                               class="text-blue-400 hover:underline text-xs font-mono">
+                                {{ sub.tx_signature[:12] }}...
+                            </a>
+                            {% else %}
+                            <span class="text-gray-500">-</span>
+                            {% endif %}
+                        </td>
+                        <td class="py-3 text-gray-500 text-xs">{{ sub.paid_at[:16] if sub.paid_at else '-' }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p class="text-gray-500">No payouts yet.</p>
+            {% endif %}
+        </div>
+        
+        <!-- Rejected -->
+        {% if rejected %}
+        <div class="bg-gray-900 rounded-lg p-6 mt-6">
+            <h2 class="text-lg font-bold text-red-400 mb-4">❌ Rejected ({{ rejected|length }})</h2>
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="text-gray-500 border-b border-gray-700">
+                        <th class="text-left pb-2">Task</th>
+                        <th class="text-left pb-2">Wallet</th>
+                        <th class="text-left pb-2">Reason</th>
+                        <th class="text-left pb-2">Date</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for sub in rejected[-10:] %}
+                    <tr class="border-b border-gray-800">
+                        <td class="py-3">
+                            <a href="https://github.com/WattCoin-Org/wattcoin/issues/{{ sub.task_id }}" 
+                               target="_blank" class="text-blue-400 hover:underline">
+                                #{{ sub.task_id }}
+                            </a>
+                        </td>
+                        <td class="py-3 font-mono text-xs">{{ sub.wallet[:8] }}...</td>
+                        <td class="py-3 text-gray-400 text-xs">
+                            {{ sub.grok_review.reason[:60] if sub.grok_review else sub.get('reject_reason', '-') }}...
+                        </td>
+                        <td class="py-3 text-gray-500 text-xs">{{ sub.submitted_at[:10] }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+        
+    </div>
+</body>
+</html>
+"""
+
+@admin_bp.route('/submissions')
+@login_required
+def submissions():
+    """Task submissions management page."""
+    message = request.args.get('message', '')
+    error = request.args.get('error', '')
+    
+    data = load_submissions()
+    subs = data.get("submissions", [])
+    
+    # Categorize
+    pending = [s for s in subs if s.get("status") in ["pending_review", "approved"]]
+    paid = [s for s in subs if s.get("status") == "paid"]
+    rejected = [s for s in subs if s.get("status") == "rejected"]
+    
+    # Sort by date descending
+    pending.sort(key=lambda x: x.get("submitted_at", ""), reverse=True)
+    paid.sort(key=lambda x: x.get("paid_at", x.get("submitted_at", "")), reverse=True)
+    rejected.sort(key=lambda x: x.get("submitted_at", ""), reverse=True)
+    
+    stats = {
+        "pending": len([s for s in subs if s.get("status") == "pending_review"]),
+        "approved": len([s for s in subs if s.get("status") == "approved"]),
+        "paid": len(paid),
+        "rejected": len(rejected)
+    }
+    
+    return render_template_string(SUBMISSIONS_HTML,
+        stats=stats,
+        pending=pending,
+        paid=paid,
+        rejected=rejected,
+        message=message,
+        error=error
+    )
+
+@admin_bp.route('/submissions/approve/<sub_id>', methods=['POST'])
+@login_required
+def approve_submission(sub_id):
+    """Approve a pending submission and trigger payout."""
+    data = load_submissions()
+    
+    for sub in data.get("submissions", []):
+        if sub.get("id") == sub_id:
+            if sub.get("status") == "paid":
+                return redirect(url_for('admin.submissions', error="Already paid"))
+            
+            # Try to send payout
+            from api_tasks import send_watt_payout
+            success, result = send_watt_payout(sub["wallet"], sub["amount"])
+            
+            if success:
+                sub["status"] = "paid"
+                sub["tx_signature"] = result
+                sub["paid_at"] = datetime.now().isoformat() + "Z"
+                sub["approved_by"] = "admin"
+                save_submissions(data)
+                
+                # Post GitHub comment
+                try:
+                    comment = f"""## ✅ Task Completed - Admin Approved
+
+**Submission ID:** `{sub_id}`
+**Agent Wallet:** `{sub['wallet']}`
+**Payout:** {sub['amount']:,} WATT
+**TX:** [{result[:16]}...](https://solscan.io/tx/{result})
+
+---
+*Manually approved by admin*
+"""
+                    requests.post(
+                        f"https://api.github.com/repos/{REPO}/issues/{sub['task_id']}/comments",
+                        headers={"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"},
+                        json={"body": comment},
+                        timeout=10
+                    )
+                except:
+                    pass
+                
+                return redirect(url_for('admin.submissions', message=f"Paid {sub['amount']:,} WATT! TX: {result[:12]}..."))
+            else:
+                return redirect(url_for('admin.submissions', error=f"Payout failed: {result}"))
+    
+    return redirect(url_for('admin.submissions', error="Submission not found"))
+
+@admin_bp.route('/submissions/reject/<sub_id>', methods=['POST'])
+@login_required
+def reject_submission(sub_id):
+    """Reject a pending submission."""
+    data = load_submissions()
+    
+    for sub in data.get("submissions", []):
+        if sub.get("id") == sub_id:
+            if sub.get("status") == "paid":
+                return redirect(url_for('admin.submissions', error="Cannot reject - already paid"))
+            
+            sub["status"] = "rejected"
+            sub["reject_reason"] = "Rejected by admin"
+            sub["rejected_at"] = datetime.now().isoformat() + "Z"
+            save_submissions(data)
+            
+            return redirect(url_for('admin.submissions', message=f"Submission {sub_id[:12]}... rejected"))
+    
+    return redirect(url_for('admin.submissions', error="Submission not found"))
