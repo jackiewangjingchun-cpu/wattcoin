@@ -1,4 +1,19 @@
 ## [February 3, 2026] - [UTC]
+- **Action**: Windows GUI release
+- **Version**: v2.2.0
+- **Files**: wattnode/wattnode_gui.py, wattnode/build_windows.py, wattnode/installer.iss, wattnode/requirements_gui.txt, wattnode/README_GUI.md, wattnode/assets/logo.png
+- **Summary**: WattNode Windows Desktop Application
+  - Point-and-click GUI (no command line needed)
+  - Dark theme matching wattcoin.org (black/gray/neon green)
+  - Live stats: jobs completed, WATT earned
+  - Activity log showing real-time job processing
+  - One-click registration with stake verification
+  - Auto-save configuration
+  - PyInstaller build script for .exe
+  - Inno Setup installer script for Windows installer
+- **Requested by**: Chris
+
+## [February 3, 2026] - [UTC]
 - **Action**: Auto-payout feature
 - **Version**: v2.1.1
 - **Files**: api_nodes.py
