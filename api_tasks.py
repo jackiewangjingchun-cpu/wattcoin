@@ -242,7 +242,7 @@ Be strict but fair. Confidence should reflect how certain you are about your eva
                 "Content-Type": "application/json"
             },
             json={
-                "model": "grok-3-fast",
+                "model": "grok-4-1-fast-reasoning",
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.1
             },
