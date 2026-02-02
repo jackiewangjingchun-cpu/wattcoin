@@ -1,5 +1,20 @@
 ## [February 2, 2026] - [UTC]
 - **Action**: Feature release
+- **Version**: v1.4.0
+- **Files**: api_llm.py (new), bridge_web.py
+- **Summary**: LLM Proxy - Pay WATT for Grok queries
+  - `POST /api/v1/llm` - Submit prompt with WATT payment proof
+  - `GET /api/v1/llm/pricing` - Get current pricing info
+  - Grok-only v1: 500 WATT per query
+  - Solana TX verification via HTTP RPC (no solana-py dep)
+  - Replay protection (used signatures tracking)
+  - Rate limiting: 20/wallet/day, 500 global/day
+  - Usage logging with burn tracking (0.05%)
+  - Error codes: tx_not_found, tx_too_old, invalid_amount, etc.
+- **Requested by**: Chris - Issue #13 (LLM proxy)
+
+## [February 2, 2026] - [UTC]
+- **Action**: Feature release
 - **Version**: v1.3.0
 - **Files**: admin_blueprint.py, bridge_web.py, api_bounties.py (new)
 - **Summary**: API Key Authentication for Scraper + Dashboard Nav Tabs + Bounties API
