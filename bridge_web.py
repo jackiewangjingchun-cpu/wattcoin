@@ -51,9 +51,11 @@ CORS(app, origins=[
 from admin_blueprint import admin_bp
 from api_bounties import bounties_bp
 from api_llm import llm_bp
+from api_reputation import reputation_bp
 app.register_blueprint(admin_bp)
 app.register_blueprint(bounties_bp)
 app.register_blueprint(llm_bp)
+app.register_blueprint(reputation_bp)
 
 # =============================================================================
 # API CLIENTS
