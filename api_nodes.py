@@ -519,7 +519,6 @@ def test_create_job():
     Admin endpoint to create a test job for debugging.
     Requires ADMIN_PASSWORD header.
     """
-    import os
     admin_pass = os.environ.get('ADMIN_PASSWORD', '')
     auth_header = request.headers.get('Authorization', '')
     
