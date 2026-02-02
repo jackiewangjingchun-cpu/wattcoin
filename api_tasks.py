@@ -282,55 +282,104 @@ def send_watt_payout(to_wallet, amount):
     """
     Send WATT tokens from bounty wallet to recipient.
     Returns: (success, tx_signature or error_message)
+    
+    Currently queues for manual payout via dashboard.
+    Auto-payout requires BOUNTY_WALLET_PRIVATE_KEY and additional testing.
     """
     if not BOUNTY_WALLET_PRIVATE_KEY:
-        return False, "BOUNTY_WALLET_PRIVATE_KEY not configured"
+        # Queue for manual payout - this is the expected flow for now
+        return False, "Queued for manual payout via dashboard"
     
     try:
-        from solana.keypair import Keypair
-        from solana.rpc.api import Client
-        from solana.transaction import Transaction
-        from solana.publickey import PublicKey
-        from spl.token.instructions import transfer, get_associated_token_address
-        from spl.token.constants import TOKEN_2022_PROGRAM_ID
+        from solders.keypair import Keypair
+        from solders.pubkey import Pubkey
+        from solders.instruction import Instruction, AccountMeta
+        from solders.transaction import Transaction
+        from solders.message import Message
+        from solders.hash import Hash
+        import struct
         
-        # Load wallet
+        # Token-2022 program ID (WATT uses Token-2022)
+        TOKEN_2022_PROGRAM_ID = Pubkey.from_string("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")
+        ASSOCIATED_TOKEN_PROGRAM_ID = Pubkey.from_string("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL")
+        
+        # Load wallet from private key
         key_bytes = base58.b58decode(BOUNTY_WALLET_PRIVATE_KEY)
         wallet = Keypair.from_bytes(key_bytes)
         
-        client = Client(SOLANA_RPC)
-        
-        mint = PublicKey(WATT_MINT)
+        mint = Pubkey.from_string(WATT_MINT)
         from_pubkey = wallet.pubkey()
-        to_pubkey = PublicKey(to_wallet)
+        to_pubkey = Pubkey.from_string(to_wallet)
         
-        # Get associated token addresses
-        from_ata = get_associated_token_address(from_pubkey, mint, token_program_id=TOKEN_2022_PROGRAM_ID)
-        to_ata = get_associated_token_address(to_pubkey, mint, token_program_id=TOKEN_2022_PROGRAM_ID)
+        # Get ATAs via RPC (more reliable than calculating)
+        def get_ata_for_owner(owner_str):
+            resp = requests.post(SOLANA_RPC, json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "getTokenAccountsByOwner",
+                "params": [owner_str, {"mint": WATT_MINT}, {"encoding": "jsonParsed"}]
+            }, timeout=15)
+            data = resp.json()
+            accounts = data.get("result", {}).get("value", [])
+            if accounts:
+                return Pubkey.from_string(accounts[0]["pubkey"])
+            return None
         
-        # Build transfer instruction (6 decimals)
-        amount_raw = amount * (10 ** 6)
+        from_ata = get_ata_for_owner(str(from_pubkey))
+        to_ata = get_ata_for_owner(to_wallet)
         
-        ix = transfer(
-            source=from_ata,
-            dest=to_ata,
-            owner=from_pubkey,
-            amount=amount_raw,
-            program_id=TOKEN_2022_PROGRAM_ID
-        )
+        if not from_ata:
+            return False, "Bounty wallet has no WATT token account"
+        if not to_ata:
+            return False, f"Recipient {to_wallet[:8]}... has no WATT token account. They need to receive WATT first."
         
-        # Build and send transaction
-        tx = Transaction().add(ix)
-        tx.recent_blockhash = client.get_latest_blockhash().value.blockhash
-        tx.fee_payer = from_pubkey
-        tx.sign(wallet)
+        # Build transfer instruction (opcode 3 for SPL token transfer)
+        amount_raw = amount * (10 ** 6)  # 6 decimals
+        instruction_data = struct.pack('<BQ', 3, amount_raw)
         
-        result = client.send_transaction(tx, wallet)
+        # Account metas for transfer: [source, dest, owner]
+        accounts = [
+            AccountMeta(from_ata, is_signer=False, is_writable=True),
+            AccountMeta(to_ata, is_signer=False, is_writable=True),
+            AccountMeta(from_pubkey, is_signer=True, is_writable=False),
+        ]
         
-        if result.value:
-            return True, str(result.value)
+        transfer_ix = Instruction(TOKEN_2022_PROGRAM_ID, instruction_data, accounts)
+        
+        # Get recent blockhash
+        rpc_resp = requests.post(SOLANA_RPC, json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "getLatestBlockhash",
+            "params": [{"commitment": "finalized"}]
+        }, timeout=15)
+        blockhash_data = rpc_resp.json()
+        blockhash = Hash.from_string(blockhash_data["result"]["value"]["blockhash"])
+        
+        # Build and sign transaction
+        msg = Message.new_with_blockhash([transfer_ix], from_pubkey, blockhash)
+        tx = Transaction.new_unsigned(msg)
+        tx.sign([wallet], blockhash)
+        
+        # Serialize and send
+        tx_bytes = bytes(tx)
+        tx_base64 = base58.b58encode(tx_bytes).decode('utf-8')
+        
+        send_resp = requests.post(SOLANA_RPC, json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "sendTransaction",
+            "params": [tx_base64, {"encoding": "base58", "skipPreflight": False}]
+        }, timeout=30)
+        
+        send_result = send_resp.json()
+        
+        if "result" in send_result:
+            return True, send_result["result"]
+        elif "error" in send_result:
+            return False, f"RPC error: {send_result['error'].get('message', str(send_result['error']))}"
         else:
-            return False, "Transaction failed"
+            return False, "Unknown RPC response"
             
     except ImportError as e:
         return False, f"Solana libraries not installed: {e}"
@@ -517,8 +566,13 @@ def submit_task(task_id):
             if task["type"] == "one-time":
                 close_github_issue(task_id)
         else:
-            submission["status"] = "payout_failed"
-            submission["payout_error"] = tx_or_error
+            # Check if it's queued for manual payout (expected) vs actual failure
+            if "manual payout" in tx_or_error.lower():
+                submission["status"] = "approved"  # Verified, awaiting manual payout
+                submission["payout_note"] = "Awaiting manual payout via dashboard"
+            else:
+                submission["status"] = "payout_failed"
+                submission["payout_error"] = tx_or_error
     
     elif grok_review["pass"]:
         # Pass but low confidence - queue for manual review
@@ -545,7 +599,7 @@ def submit_task(task_id):
         "tx_signature": submission.get("tx_signature"),
         "message": {
             "paid": f"Task completed! {task['amount']:,} WATT sent to {wallet[:8]}...",
-            "approved": "Task verified. Payout pending.",
+            "approved": f"Task verified by Grok! {task['amount']:,} WATT payout pending admin approval.",
             "pending_review": "Submitted for manual review (Grok confidence below threshold).",
             "rejected": f"Submission rejected: {grok_review['reason']}",
             "payout_failed": f"Verified but payout failed: {submission.get('payout_error', 'Unknown error')}"
