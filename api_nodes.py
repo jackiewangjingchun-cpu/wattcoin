@@ -1,6 +1,6 @@
 """
 WattNode API - Node registration, job routing, payouts
-v2.1.1 - Auto-payout added
+v2.3.0 - Added /api/v1/stats endpoint
 """
 
 from flask import Blueprint, request, jsonify
@@ -564,6 +564,62 @@ def get_node(node_id):
         "total_earned": node.get("total_earned", 0),
         "registered_at": node.get("registered_at"),
         "stake_amount": node.get("stake_amount")
+    })
+
+@nodes_bp.route('/api/v1/stats', methods=['GET'])
+def get_network_stats():
+    """Public: Get network-wide statistics for display on /nodes page"""
+    nodes_data = load_nodes()
+    jobs_data = load_jobs()
+    
+    nodes = nodes_data.get("nodes", {})
+    jobs = jobs_data.get("jobs", {})
+    
+    # Node stats
+    total_nodes = len(nodes)
+    active_nodes = sum(1 for n in nodes.values() if is_node_active(n))
+    
+    # Aggregate from nodes
+    total_jobs_from_nodes = sum(n.get("jobs_completed", 0) for n in nodes.values())
+    total_watt_earned = sum(n.get("total_earned", 0) for n in nodes.values())
+    
+    # Jobs stats (as backup/verification)
+    completed_jobs = len(jobs_data.get("completed", []))
+    paid_jobs = sum(1 for j in jobs.values() if j.get("payout_status") == "paid")
+    
+    # Try to load task submissions for additional payout stats
+    task_payouts = 0
+    try:
+        submissions_file = "/app/data/task_submissions.json"
+        if os.path.exists(submissions_file):
+            with open(submissions_file, 'r') as f:
+                submissions_data = json.load(f)
+                for sub in submissions_data.get("submissions", []):
+                    if sub.get("status") == "approved" and sub.get("payout_tx"):
+                        task_payouts += sub.get("reward", 0)
+    except:
+        pass
+    
+    # Total WATT distributed (nodes + tasks)
+    total_watt_paid = total_watt_earned + task_payouts
+    
+    return jsonify({
+        "success": True,
+        "nodes": {
+            "total_registered": total_nodes,
+            "active": active_nodes,
+            "inactive": total_nodes - active_nodes
+        },
+        "jobs": {
+            "total_completed": total_jobs_from_nodes,
+            "total_paid": paid_jobs
+        },
+        "payouts": {
+            "nodes_watt": total_watt_earned,
+            "tasks_watt": task_payouts,
+            "total_watt": total_watt_paid
+        },
+        "updated_at": datetime.now(timezone.utc).isoformat()
     })
 
 # === Job Creation Helper (called by scraper/inference endpoints) ===
