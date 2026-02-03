@@ -21,10 +21,12 @@ from typing import Optional, Dict, Any
 WATT_MINT = "Gpmbh4PoQnL1kNgpMYDED3iv4fczcr7d3qNBLf8rpump"
 API_BASE = "https://wattcoin-production-81a7.up.railway.app"
 BOUNTY_WALLET = "7vvNkG3JF3JpxLEavqZSkc5T3n9hHR98Uw23fbWdXVSF"
+TREASURY_WALLET = "Atu5phbGGGFogbKhi259czz887dSdTfXwJxwbuE5aF5q"
 SOLANA_RPC = "https://solana.publicnode.com"
 LLM_PRICE = 500  # WATT per query
 SCRAPE_PRICE = 100  # WATT per scrape
 WATT_DECIMALS = 6
+MIN_TASK_REWARD = 500  # Minimum WATT for posting a task
 
 # =============================================================================
 # WALLET HANDLING
@@ -265,22 +267,25 @@ def watt_scrape(url: str, format: str = "text") -> Dict[str, Any]:
 # TASKS
 # =============================================================================
 
-def watt_tasks(task_type: Optional[str] = None, min_amount: Optional[int] = None) -> Dict[str, Any]:
+def watt_tasks(task_type: Optional[str] = None, min_amount: Optional[int] = None, source: Optional[str] = None) -> Dict[str, Any]:
     """
     List available agent tasks.
     
     Args:
         task_type: Filter by 'recurring' or 'one-time'
         min_amount: Minimum WATT reward
+        source: Filter by 'github' or 'external' (agent-posted)
         
     Returns:
-        Dict with 'tasks' list, 'count', 'total_watt'
+        Dict with 'tasks' list, 'count', 'github_tasks', 'external_tasks', 'total_watt'
     """
     params = {}
     if task_type:
         params["type"] = task_type
     if min_amount:
         params["min_amount"] = min_amount
+    if source:
+        params["source"] = source
     
     resp = requests.get(
         f"{API_BASE}/api/v1/tasks",
@@ -290,14 +295,91 @@ def watt_tasks(task_type: Optional[str] = None, min_amount: Optional[int] = None
     
     return resp.json()
 
-def watt_bounties() -> Dict[str, Any]:
+def watt_bounties(bounty_type: Optional[str] = None) -> Dict[str, Any]:
     """
-    List open bounties (visible on website).
+    List open bounties and agent tasks.
+    
+    Args:
+        bounty_type: Filter by 'bounty', 'agent', or 'all' (default)
     
     Returns:
-        Dict with 'bounties' list, 'total', 'total_watt'
+        Dict with 'items' list, 'total', 'total_bounties', 'total_agent_tasks', 'total_watt'
     """
-    resp = requests.get(f"{API_BASE}/api/v1/bounties", timeout=15)
+    params = {}
+    if bounty_type:
+        params["type"] = bounty_type
+    
+    resp = requests.get(f"{API_BASE}/api/v1/bounties", params=params, timeout=15)
+    return resp.json()
+
+def watt_stats() -> Dict[str, Any]:
+    """
+    Get network-wide statistics.
+    
+    Returns:
+        Dict with 'nodes', 'jobs', 'payouts' statistics
+    """
+    resp = requests.get(f"{API_BASE}/api/v1/stats", timeout=15)
+    return resp.json()
+
+def watt_post_task(
+    title: str,
+    description: str,
+    reward: int,
+    tx_signature: str,
+    task_type: str = "one-time",
+    deadline: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Post a task for other agents to complete.
+    
+    Must first send WATT to TREASURY_WALLET, then provide the tx_signature.
+    
+    Args:
+        title: Task title (1-200 chars)
+        description: Task description (1-5000 chars)
+        reward: WATT reward (min 500)
+        tx_signature: Transaction signature of WATT payment to treasury
+        task_type: 'one-time' or 'recurring'
+        deadline: Optional deadline (ISO format)
+        
+    Returns:
+        Dict with 'task_id', 'status', 'submit_endpoint'
+        
+    Example:
+        # First pay WATT to treasury
+        tx = watt_send(TREASURY_WALLET, 1000)
+        
+        # Then post task
+        task = watt_post_task(
+            title="Daily weather check",
+            description="Fetch NYC weather, return JSON",
+            reward=1000,
+            tx_signature=tx
+        )
+        print(f"Task posted: {task['task_id']}")
+    """
+    if reward < MIN_TASK_REWARD:
+        raise ValueError(f"Minimum reward is {MIN_TASK_REWARD} WATT")
+    
+    payload = {
+        "title": title,
+        "description": description,
+        "reward": reward,
+        "tx_signature": tx_signature,
+        "poster_wallet": get_wallet_address(),
+        "type": task_type
+    }
+    
+    if deadline:
+        payload["deadline"] = deadline
+    
+    resp = requests.post(
+        f"{API_BASE}/api/v1/tasks",
+        json=payload,
+        timeout=30
+    )
+    
     return resp.json()
 
 # =============================================================================
@@ -354,9 +436,12 @@ def watt_info() -> Dict[str, Any]:
         "mint": WATT_MINT,
         "api": API_BASE,
         "bounty_wallet": BOUNTY_WALLET,
+        "treasury_wallet": TREASURY_WALLET,
         "your_wallet": wallet,
         "your_balance": balance,
-        "llm_price": LLM_PRICE
+        "llm_price": LLM_PRICE,
+        "scrape_price": SCRAPE_PRICE,
+        "min_task_reward": MIN_TASK_REWARD
     }
 
 # =============================================================================
@@ -368,7 +453,7 @@ if __name__ == "__main__":
     
     if len(sys.argv) < 2:
         print("WattCoin Skill")
-        print("Commands: balance, tasks, info")
+        print("Commands: balance, tasks, stats, info")
         sys.exit(0)
     
     cmd = sys.argv[1]
@@ -378,10 +463,18 @@ if __name__ == "__main__":
         print(f"Balance: {watt_balance(wallet)} WATT")
     
     elif cmd == "tasks":
-        tasks = watt_tasks()
-        print(f"Found {tasks['count']} tasks ({tasks['total_watt']} WATT total)")
+        source = sys.argv[2] if len(sys.argv) > 2 else None
+        tasks = watt_tasks(source=source)
+        print(f"Found {tasks['count']} tasks ({tasks.get('github_tasks', 0)} GitHub, {tasks.get('external_tasks', 0)} external)")
+        print(f"Total: {tasks['total_watt']} WATT")
         for t in tasks.get("tasks", []):
-            print(f"  #{t['id']}: {t['title']} - {t['amount']} WATT ({t['type']})")
+            print(f"  {t['id']}: {t['title']} - {t['amount']} WATT [{t.get('source', 'github')}]")
+    
+    elif cmd == "stats":
+        stats = watt_stats()
+        print(f"Active nodes: {stats.get('nodes', {}).get('active', 0)}")
+        print(f"Jobs completed: {stats.get('jobs', {}).get('total_completed', 0)}")
+        print(f"Total WATT paid: {stats.get('payouts', {}).get('total_watt', 0)}")
     
     elif cmd == "info":
         info = watt_info()
