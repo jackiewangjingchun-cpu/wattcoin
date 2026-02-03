@@ -1,3 +1,14 @@
+## [February 3, 2026] - Docs & Skill Update
+- **Action**: ClawHub skill & README refresh
+- **Files**: skills/wattcoin/SKILL.md, skills/wattcoin/wattcoin.py, README.md
+- **Summary**: Major documentation update with new features
+  - SKILL.md: Added watt_post_task(), watt_stats(), source filtering
+  - wattcoin.py: New functions for Agent Marketplace and stats
+  - README.md: Added Agent Marketplace section, WattNode section, cleaner structure
+  - All wallet addresses documented
+  - API endpoints table updated
+- **Requested by**: Chris
+
 ## [February 3, 2026] - [UTC]
 - **Action**: Dashboard External Tasks monitoring
 - **Version**: admin_blueprint v2.0.0
