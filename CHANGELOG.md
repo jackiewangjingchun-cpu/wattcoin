@@ -1,4 +1,15 @@
 ## [February 3, 2026] - [UTC]
+- **Action**: Dashboard External Tasks monitoring
+- **Version**: admin_blueprint v2.0.0
+- **Files**: admin_blueprint.py
+- **Summary**: Added External Tasks section to Agent Tasks dashboard
+  - Shows open/completed task counts
+  - Displays total WATT posted and paid
+  - Lists all externally posted tasks with status
+  - Read-only monitoring (fully automated, no approval needed)
+- **Requested by**: Chris
+
+## [February 3, 2026] - [UTC]
 - **Action**: External task posting
 - **Version**: v2.4.0
 - **Files**: api_tasks.py
