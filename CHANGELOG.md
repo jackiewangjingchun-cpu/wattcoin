@@ -1,4 +1,16 @@
 ## [February 3, 2026] - [UTC]
+- **Action**: Network stats API endpoint
+- **Version**: v2.3.0
+- **Files**: api_nodes.py
+- **Summary**: New `GET /api/v1/stats` endpoint for network statistics
+  - Active/total registered nodes count
+  - Total jobs completed across network
+  - Total WATT paid out (nodes + tasks combined)
+  - Used for /nodes page dashboard display
+  - Useful for agents monitoring network health
+- **Requested by**: Chris
+
+## [February 3, 2026] - [UTC]
 - **Action**: Bounties API extension
 - **Version**: v2.3.0
 - **Files**: api_bounties.py
