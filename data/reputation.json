@@ -40,6 +40,23 @@
         }
       ],
       "tier": "bronze"
+    },
+    "imonlyspace": {
+      "github": "imonlyspace",
+      "wallet": "AjMrFBWcUmsVAu1dt23EyrJvfJUY6tN56Dwpi4vy5TWZ",
+      "bounties_completed": 1,
+      "total_watt_earned": 10000,
+      "first_contribution": "2026-02-03",
+      "bounties": [
+        {
+          "issue": 26,
+          "title": "Add ClawHub integration metadata to SKILL.md",
+          "amount": 10000,
+          "completed_at": "2026-02-03",
+          "tx_signature": "368T5Nyj9M7WakiYdDQPX1dEfcgeBvsZSy5XzC26GZEyk1PtnUenqjzztwVEXHx8gcgQAqh1BUMFVJSc9oYAWmDf"
+        }
+      ],
+      "tier": "bronze"
     }
   },
   "tiers": {
@@ -48,9 +65,9 @@
     "gold": { "min_bounties": 5, "min_watt": 250000 }
   },
   "stats": {
-    "total_contributors": 2,
-    "total_bounties_paid": 3,
-    "total_watt_distributed": 170000,
-    "last_updated": "2026-02-02T05:30:00Z"
+    "total_contributors": 3,
+    "total_bounties_paid": 4,
+    "total_watt_distributed": 180000,
+    "last_updated": "2026-02-03T19:50:00Z"
   }
 }
