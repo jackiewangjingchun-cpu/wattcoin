@@ -1,17 +1,14 @@
 """
-WattCoin Skill - Pay and earn WATT tokens for agent tasks.
+WattCoin Skill - CORRECTLY FIXED for solders 0.18+
 
-Setup:
-    export WATT_WALLET_PRIVATE_KEY="your_base58_private_key"
-    
-Requirements:
-    pip install solana solders requests base58
+This version uses the CORRECT Transaction signing API for modern solders
 """
 
 import os
 import json
 import requests
 import base58
+import struct
 from typing import Optional, Dict, Any
 
 # =============================================================================
@@ -103,7 +100,7 @@ def watt_balance() -> int:
         return 0
 
 # =============================================================================
-# PAYMENTS
+# PAYMENTS - CORRECTLY FIXED FOR SOLDERS
 # =============================================================================
 
 def watt_send(to: str, amount: int) -> str:
@@ -118,15 +115,14 @@ def watt_send(to: str, amount: int) -> str:
         Transaction signature
     """
     from solana.rpc.api import Client
-    from solana.rpc.commitment import Confirmed
     from solders.transaction import Transaction
     from solders.message import Message
     from solders.pubkey import Pubkey
     from solders.instruction import Instruction, AccountMeta
     from solders.hash import Hash
+    from solders.signature import Signature
     from spl.token.instructions import get_associated_token_address
     from spl.token.constants import TOKEN_2022_PROGRAM_ID
-    import struct
     
     wallet = _get_wallet()
     client = Client(SOLANA_RPC)
@@ -159,15 +155,18 @@ def watt_send(to: str, amount: int) -> str:
     blockhash_resp = client.get_latest_blockhash()
     recent_blockhash = Hash.from_string(str(blockhash_resp.value.blockhash))
     
-    # Build message and transaction
+    # Build message
     msg = Message.new_with_blockhash(
         [transfer_ix],
         from_pubkey,
         recent_blockhash
     )
     
-    tx = Transaction.new_unsigned(msg)
-    tx = Transaction([wallet], msg, recent_blockhash)
+    # CORRECT WAY: Sign the message, then create Transaction with signature
+    signature = wallet.sign_message(msg.to_bytes())
+    
+    # Create transaction with signature and message
+    tx = Transaction([signature], msg)
     
     # Send transaction
     result = client.send_transaction(tx)
