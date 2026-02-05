@@ -158,7 +158,7 @@ def auto_merge_pr(pr_number, review_score):
     """
     import requests
     
-    MERGE_THRESHOLD = 85  # Require 85% score for auto-merge
+    MERGE_THRESHOLD = 8  # Grok scores are 1-10, not 1-100 (8/10 = 80%)
     
     if review_score < MERGE_THRESHOLD:
         return False, f"Score {review_score} < {MERGE_THRESHOLD} threshold"
@@ -239,7 +239,7 @@ def handle_pr_review_trigger(pr_number, action):
     passed = review_data.get("pass", False)
     
     # If review passed threshold, auto-merge
-    if passed and score >= 85:
+    if passed and score >= 8:  # 8/10 = 80% threshold
         # Attempt auto-merge
         merged, merge_error = auto_merge_pr(pr_number, score)
         
