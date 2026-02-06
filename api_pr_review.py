@@ -1,11 +1,11 @@
 """
 WattCoin PR Review API
-POST /api/v1/review_pr - Submit a PR for Grok review
+POST /api/v1/review_pr - Submit a PR for AI review
 
 Checks:
 - Rate limits
 - PR format validation
-- Calls Grok to review diff
+- Calls AI to review diff
 - Scans for dangerous code
 - Logs review results
 - Posts review comment on GitHub
@@ -38,16 +38,16 @@ pr_review_bp = Blueprint('pr_review', __name__)
 # CONFIG
 # =============================================================================
 
-GROK_API_KEY = os.getenv("GROK_API_KEY")
+AI_API_KEY = os.getenv("AI_API_KEY")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 REPO = "WattCoin-Org/wattcoin"
 
 PR_REVIEWS_FILE = f"{DATA_DIR}/pr_reviews.json"
 
-# Grok client
-grok_client = None
-if GROK_API_KEY:
-    grok_client = OpenAI(api_key=GROK_API_KEY, base_url="https://api.x.ai/v1")
+# AI client
+ai_client = None
+if AI_API_KEY:
+    ai_client = OpenAI(api_key=AI_API_KEY, base_url="https://api.x.ai/v1")
 
 # =============================================================================
 # GITHUB HELPERS
@@ -126,10 +126,10 @@ def post_pr_comment(pr_number, comment):
         return False
 
 # =============================================================================
-# GROK REVIEW
+# AI REVIEW
 # =============================================================================
 
-GROK_REVIEW_PROMPT = """You are reviewing a Pull Request for the WattCoin project.
+AI_REVIEW_PROMPT = """You are reviewing a Pull Request for the WattCoin project.
 
 Repository: https://github.com/WattCoin-Org/wattcoin
 WattCoin is a Solana utility token for AI/robot automation with distributed compute network.
@@ -178,13 +178,13 @@ Respond ONLY with valid JSON in this exact format:
 
 Do not include any text before or after the JSON."""
 
-def call_grok_review(pr_data, security_warnings):
+def call_ai_review(pr_data, security_warnings):
     """
-    Call Grok API to review PR.
+    Call AI API to review PR.
     Returns: (review_result, error)
     """
-    if not grok_client:
-        return None, "Grok API not configured"
+    if not ai_client:
+        return None, "AI API not configured"
     
     try:
         # Prepare prompt
@@ -198,7 +198,7 @@ def call_grok_review(pr_data, security_warnings):
                 for w in security_warnings[:5]
             ])
         
-        prompt = GROK_REVIEW_PROMPT.format(
+        prompt = AI_REVIEW_PROMPT.format(
             pr_number=pr_data.get("number"),
             title=pr_data.get("title", ""),
             author=pr_data.get("user", {}).get("login", "unknown"),
@@ -210,8 +210,8 @@ def call_grok_review(pr_data, security_warnings):
             security_warnings=warnings_text
         )
         
-        # Call Grok
-        response = grok_client.chat.completions.create(
+        # Call AI
+        response = ai_client.chat.completions.create(
             model="grok-code-fast-1",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
@@ -232,7 +232,7 @@ def call_grok_review(pr_data, security_warnings):
         # Validate required fields
         required = ["pass", "score", "feedback"]
         if not all(k in review for k in required):
-            return None, f"Invalid Grok response format: missing fields"
+            return None, f"Invalid AI response format: missing fields"
         
         # Ensure score is int
         review["score"] = int(review["score"])
@@ -243,9 +243,9 @@ def call_grok_review(pr_data, security_warnings):
         return review, None
         
     except json.JSONDecodeError as e:
-        return None, f"Failed to parse Grok response as JSON: {e}"
+        return None, f"Failed to parse AI response as JSON: {e}"
     except Exception as e:
-        return None, f"Grok API error: {e}"
+        return None, f"AI API error: {e}"
 
 # =============================================================================
 # REVIEW ENDPOINT
@@ -254,7 +254,7 @@ def call_grok_review(pr_data, security_warnings):
 @pr_review_bp.route('/api/v1/review_pr', methods=['POST'])
 def review_pr():
     """
-    Review a PR using Grok API.
+    Review a PR using AI.
     
     Body:
     {
@@ -347,16 +347,14 @@ def review_pr():
             "format_errors": format_errors
         }), 400
     
-    # Extract wallet
+    # Extract wallet (optional - review runs regardless, wallet needed for payment only)
     wallet, wallet_error = extract_wallet_from_pr_body(pr_data.get("body", ""))
     if wallet_error:
-        return jsonify({
-            "success": False,
-            "error": wallet_error
-        }), 400
+        print(f"[REVIEW] No wallet in PR #{pr_number} body — review will proceed, payment deferred", flush=True)
+        wallet = None  # Continue without wallet
     
-    # Check rate limit
-    is_allowed, rate_error, remaining = check_rate_limit(wallet)
+    # Check rate limit (skip if no wallet)
+    is_allowed, rate_error, remaining = check_rate_limit(wallet or "unknown")
     if not is_allowed:
         log_security_event("rate_limit", {
             "pr_number": pr_number,
@@ -382,10 +380,10 @@ def review_pr():
         })
         
         # Don't block entirely, but flag heavily in review
-        # (Grok will see the warnings)
+        # (AI will see the warnings)
     
-    # Call Grok for review
-    review_result, review_error = call_grok_review(pr_data, security_warnings)
+    # Call AI for review
+    review_result, review_error = call_ai_review(pr_data, security_warnings)
     if review_error:
         return jsonify({
             "success": False,
@@ -426,7 +424,7 @@ def review_pr():
     save_json_data(PR_REVIEWS_FILE, reviews)
     
     # Post comment on PR
-    comment = f"""## 🤖 Grok Review Results
+    comment = f"""## 🤖 AI Review Results
 
 **Score**: {review_result['score']}/10
 **Status**: {'✅ PASS' if review_result['pass'] else '❌ FAIL'}
