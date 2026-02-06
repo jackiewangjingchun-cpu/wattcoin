@@ -289,13 +289,14 @@ def _check_api_key_rate_limit(api_key, url, tier):
 # =============================================================================
 
 def load_bounty_data():
-    """Load bounty data from dashboard for stats endpoint."""
+    """Load payout data for stats endpoint."""
     try:
-        with open(DATA_FILE, 'r') as f:
+        payout_file = "/app/data/pr_payouts.json"
+        with open(payout_file, 'r') as f:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
-        logger.warning("Failed to load bounty data, returning empty")
-        return {"reviews": {}, "payouts": [], "history": []}
+        logger.warning("Failed to load payout data, returning empty")
+        return {"payouts": []}
 
 
 def _prune_rate_limit(queue, now):
@@ -1321,8 +1322,23 @@ def bounty_stats():
                 "author": p.get("author"),
                 "amount": p.get("amount", 0),
                 "paid_at": p.get("paid_at"),
-                "tx_sig": p.get("tx_sig", "")
+                "tx_sig": p.get("tx_signature", p.get("tx_sig", ""))
             })
+        
+        # Contributor leaderboard (aggregate by author)
+        contributor_totals = {}
+        for p in paid:
+            author = p.get("author", "unknown")
+            if author not in contributor_totals:
+                contributor_totals[author] = {"total_earned": 0, "pr_count": 0}
+            contributor_totals[author]["total_earned"] += p.get("amount", 0)
+            contributor_totals[author]["pr_count"] += 1
+        
+        leaderboard = sorted(
+            [{"username": k, **v} for k, v in contributor_totals.items()],
+            key=lambda x: x["total_earned"],
+            reverse=True
+        )
         
         return jsonify({
             "success": True,
@@ -1332,6 +1348,7 @@ def bounty_stats():
             "total_pending_watt": total_pending_watt,
             "avg_bounty": avg_bounty,
             "recent_payouts": recent_formatted,
+            "leaderboard": leaderboard,
             "updated_at": datetime.now().isoformat() + "Z"
         })
         
