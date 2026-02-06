@@ -224,19 +224,45 @@ def execute_auto_payment(pr_number, wallet, amount):
         client = Client(SOLANA_RPC)
         print(f"[PAYMENT] Connected to Solana RPC", flush=True)
         
-        # Get token accounts
+        # Get token accounts - BOTH must be looked up via RPC for Token-2022
         mint_pubkey = Pubkey.from_string(WATT_MINT)
-        sender_ata = get_associated_token_address(payer.pubkey(), mint_pubkey)
+        
+        # Look up SENDER's token account
+        print(f"[PAYMENT] Looking up sender's WATT token account...", flush=True)
+        try:
+            import requests
+            sender_rpc_payload = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "getTokenAccountsByOwner",
+                "params": [
+                    str(payer.pubkey()),
+                    {"mint": WATT_MINT},
+                    {"encoding": "jsonParsed"}
+                ]
+            }
+            
+            sender_rpc_response = requests.post(SOLANA_RPC, json=sender_rpc_payload, timeout=10)
+            sender_rpc_data = sender_rpc_response.json()
+            
+            if "result" in sender_rpc_data and sender_rpc_data["result"]["value"]:
+                sender_token_account = sender_rpc_data["result"]["value"][0]["pubkey"]
+                sender_ata = Pubkey.from_string(sender_token_account)
+                print(f"[PAYMENT] Found sender token account: {str(sender_ata)[:8]}...", flush=True)
+            else:
+                return None, f"Bounty wallet has no WATT token account!"
+        except Exception as e:
+            print(f"[PAYMENT] Error looking up sender token account: {e}", flush=True)
+            return None, f"Failed to lookup sender token account: {e}"
         
         try:
             recipient_pubkey = Pubkey.from_string(wallet)
         except Exception as e:
             return None, f"Invalid recipient wallet address: {e}"
         
-        # Query recipient's token accounts using direct RPC call (more reliable than SDK)
+        # Look up RECIPIENT's token account
         print(f"[PAYMENT] Looking up recipient's WATT token account...", flush=True)
         try:
-            import requests
             rpc_payload = {
                 "jsonrpc": "2.0",
                 "id": 1,
@@ -263,8 +289,8 @@ def execute_auto_payment(pr_number, wallet, amount):
             print(f"[PAYMENT] Error looking up token account: {e}", flush=True)
             return None, f"Failed to lookup recipient token account: {e}"
         
-        print(f"[PAYMENT] Sender ATA: {str(sender_ata)[:8]}...", flush=True)
-        print(f"[PAYMENT] Recipient ATA: {str(recipient_ata)[:8]}... (Full: {str(recipient_ata)})", flush=True)
+        print(f"[PAYMENT] Sender token account: {str(sender_ata)[:8]}... (Full: {str(sender_ata)})", flush=True)
+        print(f"[PAYMENT] Recipient token account: {str(recipient_ata)[:8]}... (Full: {str(recipient_ata)})", flush=True)
         
         # Convert amount to lamports
         amount_lamports = int(amount * (10 ** WATT_DECIMALS))
