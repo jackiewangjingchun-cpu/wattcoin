@@ -51,6 +51,36 @@ PR_PAYOUTS_FILE = f"{DATA_DIR}/pr_payouts.json"
 REPUTATION_FILE = f"{DATA_DIR}/contributor_reputation.json"
 
 # =============================================================================
+# DISCORD NOTIFICATIONS
+# =============================================================================
+
+def notify_discord(title, message, color=0xFF0000, fields=None):
+    """
+    Send alert to Discord webhook. Silent if DISCORD_WEBHOOK_URL not set.
+    Colors: red=0xFF0000, orange=0xFFA500, green=0x00FF00
+    """
+    webhook_url = os.getenv("DISCORD_WEBHOOK_URL", "")
+    if not webhook_url:
+        return  # No webhook configured — skip silently
+
+    import requests as req
+
+    embed = {
+        "title": title,
+        "description": message[:2000],
+        "color": color,
+        "timestamp": datetime.utcnow().isoformat() + "Z"
+    }
+    if fields:
+        embed["fields"] = [{"name": k, "value": str(v)[:1024], "inline": True} for k, v in fields.items()]
+
+    try:
+        req.post(webhook_url, json={"embeds": [embed]}, timeout=5)
+    except Exception as e:
+        print(f"[DISCORD] Notification failed: {e}", flush=True)
+
+
+# =============================================================================
 # CONTRIBUTOR REPUTATION (Merit System V1)
 # =============================================================================
 
@@ -642,6 +672,12 @@ def handle_pr_review_trigger(pr_number, action):
     
     if review_error:
         post_github_comment(pr_number, f"❌ **Review failed:** {review_error}")
+        notify_discord(
+            "❌ AI Review Failed",
+            f"PR #{pr_number} review could not complete.",
+            color=0xFF0000,
+            fields={"PR": f"#{pr_number}", "Error": str(review_error)[:200]}
+        )
         return jsonify({"message": "Review failed", "error": review_error}), 500
     
     review_data = review_result.get("review", {})
@@ -860,6 +896,12 @@ Please update the PR description with your wallet address in this format:
             "reason": "missing_wallet",
             "error": wallet_error
         })
+        notify_discord(
+            "⚠️ Wallet Extraction Failed",
+            f"PR #{pr_number} merged but payout wallet not found in PR body.",
+            color=0xFFA500,
+            fields={"PR": f"#{pr_number}", "Author": pr.get("user", {}).get("login", "unknown"), "Error": str(wallet_error)[:200]}
+        )
         
         return jsonify({"message": "Wallet not found in PR"}), 200
     
@@ -1182,6 +1224,12 @@ def process_payment_queue():
                     f"Thank you for your contribution! ⚡🤖"
                 )
                 print(f"[QUEUE] ✅ PR #{pr_number} paid: {tx_sig[:20]}...", flush=True)
+                notify_discord(
+                    "✅ Payment Sent",
+                    f"PR #{pr_number} bounty paid successfully.",
+                    color=0x00FF00,
+                    fields={"Amount": f"{amount:,} WATT", "Wallet": f"{wallet[:8]}...{wallet[-8:]}", "TX": f"[Solscan](https://solscan.io/tx/{tx_sig})"}
+                )
                 
                 # Record in payout ledger for leaderboard
                 record_completed_payout(
@@ -1197,6 +1245,12 @@ def process_payment_queue():
                 payment["tx_signature"] = tx_sig
                 payment["error"] = error
                 print(f"[QUEUE] ⚠️ PR #{pr_number} TX sent but unconfirmed: {error}", flush=True)
+                notify_discord(
+                    "⚠️ Payment Unconfirmed",
+                    f"PR #{pr_number} TX sent but confirmation uncertain.",
+                    color=0xFFA500,
+                    fields={"Amount": f"{amount:,} WATT", "TX": str(tx_sig)[:20] + "...", "Error": str(error)[:200]}
+                )
                 
             else:
                 retry_count = payment.get("retry_count", 0) + 1
@@ -1215,6 +1269,12 @@ def process_payment_queue():
                     f"Error: {error}\n\n"
                     f"Retried {retry_count} times. Admin will process this payment manually." )
                     print(f"[QUEUE] ❌ PR #{pr_number} payment failed after {retry_count} retries: {error}", flush=True)
+                    notify_discord(
+                        "❌ Payment Failed",
+                        f"PR #{pr_number} payment failed after {retry_count} retries.",
+                        color=0xFF0000,
+                        fields={"Amount": f"{amount:,} WATT", "Wallet": f"{wallet[:8]}...{wallet[-8:]}", "Error": str(error)[:200]}
+                    )
                 
         except Exception as e:
             retry_count = payment.get("retry_count", 0) + 1
@@ -1229,6 +1289,12 @@ def process_payment_queue():
                 payment["retry_count"] = retry_count
                 payment["error"] = str(e)
                 print(f"[QUEUE] ❌ PR #{pr_number} exception after {retry_count} retries: {e}", flush=True)
+                notify_discord(
+                    "❌ Payment Exception",
+                    f"PR #{pr_number} threw exception after {retry_count} retries.",
+                    color=0xFF0000,
+                    fields={"Amount": f"{amount:,} WATT", "Wallet": f"{wallet[:8]}...{wallet[-8:]}", "Error": str(e)[:200]}
+                )
     
     # Save updated queue
     try:
