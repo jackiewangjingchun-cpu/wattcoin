@@ -1,3 +1,20 @@
 {
-  "payouts": []
+  "payouts": [
+    {
+      "id": 1,
+      "pr_number": 78,
+      "author": "WattCoin-Org",
+      "wallet": "5QfWmeQFp5cbtGNaqrn73ELkvxUBtw8bRNFCF9fi38Az",
+      "amount": 5000,
+      "bounty_issue_id": 73,
+      "status": "paid",
+      "queued_at": "2026-02-06T06:45:00Z",
+      "approved_by": "auto",
+      "approved_at": "2026-02-06T07:07:00Z",
+      "tx_signature": "cgaVcBrCSwxtjpFfTT1t6ThaFyzoErWdvhQgrR9tGKTqGG9tC8er7Vkxp5yYCfjZJhsFim2ZoG8rxWUnqQbsaoa",
+      "paid_at": "2026-02-06T07:07:30Z",
+      "review_score": 8,
+      "payment_method": "auto_queue"
+    }
+  ]
 }
