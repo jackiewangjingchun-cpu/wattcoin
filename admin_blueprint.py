@@ -39,6 +39,7 @@ ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
 GROK_API_KEY = os.getenv("GROK_API_KEY", "")
 REPO = "WattCoin-Org/wattcoin"
+BOUNTY_WALLET_ADDRESS = os.getenv("BOUNTY_WALLET_ADDRESS", "7vvNkG3JF3JpxLEavqZSkc5T3n9hHR98Uw23fbWdXVSF")
 DATA_FILE = "/app/data/bounty_reviews.json"
 API_KEYS_FILE = "/app/data/api_keys.json"
 
@@ -802,7 +803,7 @@ PAYOUTS_TEMPLATE = """
         
         <div class="mt-6 p-4 bg-gray-800 rounded-lg">
             <p class="text-sm text-gray-400">
-                <strong>Source Wallet:</strong> 7vvNkG3JF3JpxLEavqZSkc5T3n9hHR98Uw23fbWdXVSF (bounty fund)
+                <strong>Source Wallet:</strong> {{ bounty_wallet }} (bounty fund)
             </p>
             <p class="text-sm text-gray-500 mt-2" id="walletStatus">
                 Connect Phantom to pay directly, or use 📋 to copy wallet for manual payment.
@@ -1446,7 +1447,7 @@ def approve_pr(pr_number):
                 "status": "approved",
                 "bounty": bounty,
                 "review_summary": review_text[:1000],
-                "payout_wallet": "7vvNkG3JF3JpxLEavqZSkc5T3n9hHR98Uw23fbWdXVSF",
+                "payout_wallet": BOUNTY_WALLET_ADDRESS,
                 "timestamp": datetime.now().isoformat()
             })
             
@@ -1541,7 +1542,8 @@ def payouts():
     
     return render_template_string(PAYOUTS_TEMPLATE,
         payouts=payout_list,
-        repo=REPO
+        repo=REPO,
+        bounty_wallet=BOUNTY_WALLET_ADDRESS
     )
 
 @admin_bp.route('/claims')
