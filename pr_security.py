@@ -108,9 +108,16 @@ def extract_wallet_from_pr_body(pr_body):
     if not pr_body:
         return None, "PR body is empty"
     
-    # Look for the expected format
-    pattern = r'\*\*Payout Wallet\*\*:\s*([1-9A-HJ-NP-Za-km-z]{32,44})'
-    match = re.search(pattern, pr_body)
+    # Look for wallet address in multiple formats
+    patterns = [
+        r'\*\*Payout Wallet\*\*:\s*`?([1-9A-HJ-NP-Za-km-z]{32,44})`?',   # **Payout Wallet**: addr
+        r'(?:Payout\s+)?Wallet:\s*`?([1-9A-HJ-NP-Za-km-z]{32,44})`?',    # Wallet: addr or Payout Wallet: addr
+    ]
+    match = None
+    for pattern in patterns:
+        match = re.search(pattern, pr_body)
+        if match:
+            break
     
     if not match:
         return None, "Missing wallet in PR body. Required format: **Payout Wallet**: [your_solana_address]"
