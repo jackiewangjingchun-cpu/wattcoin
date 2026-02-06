@@ -1,3 +1,23 @@
+## [February 6, 2026 - v2.3.1] - Dashboard Health Expansion + Rate Limit Revert
+
+### Dashboard Health Widgets
+- **admin_blueprint.py**: Expanded header with 4 status indicators:
+  - System Health (existing) — green/yellow/red dot, version + uptime
+  - Webhook Status (NEW) — fetches `/webhooks/health`, shows secret config state
+  - Payment Queue Badge (NEW) — yellow warning appears only when pending payments > 0
+  - Active Jobs (NEW) — displays running job count from `/health`
+- Dashboard version display updated to v2.3.1
+
+### Webhook Health Endpoint Enhancement
+- **api_webhooks.py**: `/webhooks/health` now returns `pending_payments` count
+  - Reads `/app/data/payment_queue.json` for pending items
+  - Enables dashboard to show stuck/pending payment warnings
+
+### Rate Limit Revert
+- **api_bounties.py**: `RATE_LIMIT_PER_HOUR` reverted from 5 → 3 (testing complete)
+
+---
+
 ## [February 6, 2026] - AI Review System Fix + Payment Queue Processor
 
 ### Grok→AI Rename (Phase 2 Complete)
