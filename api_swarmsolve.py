@@ -805,6 +805,7 @@ def approve_solution(solution_id):
 
         # Send treasury fee from escrow wallet
         treasury_tx = None
+        treasury_error = None
         if fee_amount > 0 and TREASURY_WALLET:
             try:
                 time.sleep(2)  # Brief delay between TXs
@@ -813,7 +814,11 @@ def approve_solution(solution_id):
                     memo=f"swarmsolve:fee:{solution_id}"
                 )
             except Exception as e:
+                treasury_error = str(e)
                 print(f"[SWARMSOLVE] Treasury fee failed (non-critical): {e}", flush=True)
+        elif not TREASURY_WALLET:
+            treasury_error = "TREASURY_WALLET_ADDRESS env var not set"
+            print(f"[SWARMSOLVE] {treasury_error}", flush=True)
 
         # Update solution record
         solution["status"] = "approved"
@@ -858,6 +863,7 @@ def approve_solution(solution_id):
             "payout_tx": winner_tx,
             "fee_watt": fee_amount,
             "treasury_tx": treasury_tx,
+            "treasury_error": treasury_error,
             "pr_number": pr_number
         }), 200
 
