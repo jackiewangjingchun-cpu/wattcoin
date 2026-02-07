@@ -26,7 +26,7 @@ Session(app)
 GROK_API_KEY = os.getenv("GROK_API_KEY")
 CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-GITHUB_REPO = "cb3tech/WATTCOIN"
+GITHUB_REPO = "WattCoin-Org/wattcoin"
 BRIDGE_PASSWORD = os.getenv("BRIDGE_PASSWORD", "")
 PROXY_SECRET = os.getenv("PROXY_SECRET", "")
 MAX_HISTORY = 10
@@ -132,7 +132,7 @@ Collaborating with Claude (Implementation). Project: Solana utility token for AI
 
 CLAUDE_SYSTEM = """WattCoin Implementation Lead. Date: {date}
 Role: Technical implementation, code, infrastructure.
-GitHub: cb3tech/WATTCOIN (use tools). Whitepaper: docs/WHITEPAPER.md"""
+GitHub: WattCoin-Org/wattcoin (use tools). Whitepaper: docs/WHITEPAPER.md"""
 
 def get_grok_system():
     return GROK_SYSTEM.format(date=datetime.now().strftime('%B %d, %Y'))
