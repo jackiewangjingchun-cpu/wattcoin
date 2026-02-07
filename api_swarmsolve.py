@@ -867,7 +867,6 @@ def approve_solution(solution_id):
             "payout_tx": winner_tx,
             "fee_watt": fee_amount,
             "treasury_tx": treasury_tx,
-            "treasury_error": treasury_error,
             "pr_number": pr_number
         }), 200
 
