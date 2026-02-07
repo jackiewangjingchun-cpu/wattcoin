@@ -429,6 +429,32 @@ Your role: Technical implementation, coding, smart contracts, infrastructure.
 Project context: {WATTCOIN_CONTEXT}
 Keep responses focused and actionable. You're collaborating with AI strategy consultant."""
 
+WATTBOT_SYSTEM = f"""You are WattBot, the official AI assistant for the WattCoin project.
+You help users understand WattCoin, its services, and how to participate.
+
+{WATTCOIN_CONTEXT}
+
+Key services:
+- LLM Proxy: Pay 500 WATT per AI query (you're it!)
+- Web Scraper API: Pay 100 WATT to scrape any URL
+- WattNode Network: Run a node, earn 70% of job payments
+- Bounty Program: Claim GitHub issues, submit PRs, earn WATT after AI review
+- Autonomous Agent Payments: AI agents can earn WATT for code contributions
+
+How to participate:
+- Buy WATT on pump.fun (CA: Gpmbh4PoQnL1kNgpMYDED3iv4fczcr7d3qNBLf8rpump)
+- Run a WattNode to earn from distributed jobs
+- Claim bounties on GitHub (WattCoin-Org/wattcoin)
+- Build AI agents that contribute code and earn WATT
+
+Links:
+- Website: https://wattcoin.org
+- GitHub: https://github.com/WattCoin-Org/wattcoin
+- Discord: https://discord.gg/K3sWgQKk
+- Twitter: https://x.com/WattCoin2026
+
+Be helpful, concise, and enthusiastic about the project. If you don't know something specific, say so rather than guessing. You are NOT a financial advisor — never give investment advice."""
+
 def query_ai(prompt, history=[]):
     if not ai_client:
         return "Error: AI API key not configured"
@@ -1113,6 +1139,85 @@ def scrape():
 # =============================================================================
 # PROXY ENDPOINTS - v1.1.0
 # =============================================================================
+
+@app.route('/api/v1/llm', methods=['POST'])
+def llm_query():
+    """
+    Public LLM endpoint - requires WATT payment.
+    
+    Request:
+        {
+            "prompt": "What is WattCoin?",
+            "wallet": "AgentWallet...",
+            "tx_signature": "..."
+        }
+    
+    Pricing: 500 WATT per query
+    """
+    LLM_PRICE_WATT = 500
+    
+    try:
+        data = request.get_json(silent=True) or {}
+        prompt = (data.get('prompt') or '').strip()
+        wallet = (data.get('wallet') or '').strip()
+        tx_signature = (data.get('tx_signature') or '').strip()
+        client_ip = _get_client_ip()
+        
+        logger.info("llm request | ip=%s wallet=%.40s prompt_len=%d", client_ip, wallet or '<none>', len(prompt))
+        
+        # Validate prompt
+        if not prompt:
+            return jsonify({"success": False, "error": "prompt required"}), 400
+        if len(prompt) > 4000:
+            return jsonify({"success": False, "error": "prompt too long (max 4000 chars)"}), 400
+        
+        # Validate payment params
+        if not wallet or not tx_signature:
+            return jsonify({"success": False, "error": "wallet and tx_signature required"}), 400
+        
+        # Verify WATT payment
+        verified, error_code, error_message = verify_watt_payment(
+            tx_signature, wallet, LLM_PRICE_WATT
+        )
+        
+        if not verified:
+            logger.warning("llm payment failed | ip=%s error=%s", client_ip, error_code)
+            return jsonify({"success": False, "error": error_message}), 400
+        
+        logger.info("llm payment verified | ip=%s wallet=%.40s", client_ip, wallet)
+        save_used_signature(tx_signature)
+        
+        # Query AI with WattBot persona
+        if not ai_client:
+            return jsonify({"success": False, "error": "AI service unavailable"}), 503
+        
+        messages = [
+            {"role": "system", "content": WATTBOT_SYSTEM},
+            {"role": "user", "content": prompt}
+        ]
+        
+        response = ai_client.chat.completions.create(
+            model="grok-3",
+            messages=messages,
+            max_tokens=2048
+        )
+        
+        ai_response = response.choices[0].message.content
+        tokens_used = getattr(response.usage, 'total_tokens', 0)
+        
+        logger.info("llm response | ip=%s tokens=%d", client_ip, tokens_used)
+        
+        return jsonify({
+            "success": True,
+            "response": ai_response,
+            "tokens_used": tokens_used,
+            "watt_charged": LLM_PRICE_WATT
+        })
+        
+    except Exception as e:
+        logger.error("llm error | %s", str(e))
+        return jsonify({"success": False, "error": "Internal error processing query"}), 500
+
 
 @app.route('/proxy', methods=['POST'])
 def proxy_request():
