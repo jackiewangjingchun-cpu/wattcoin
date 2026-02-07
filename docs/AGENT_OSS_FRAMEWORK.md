@@ -229,7 +229,7 @@ SUSPICIOUS_PATTERNS = [
 | **Name** | `wattcoin-oss` (or `agentwatt`) |
 | **Visibility** | Public |
 | **License** | MIT |
-| **Organization** | New GitHub account (not cb3tech) |
+| **Organization** | Dedicated GitHub organization (WattCoin-Org) |
 
 ### Branch Protection Rules
 
