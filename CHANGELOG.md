@@ -1,3 +1,43 @@
+## [February 7, 2026 - v3.2.2] - Agent Delegation v2.0, Spam Guards, Community Launch
+
+### Agent-to-Agent Delegation v2.0 (NEW)
+- Agents can delegate claimed tasks to sub-agents via `POST /api/v1/tasks/<id>/delegate`
+- Full delegation tree: claim → delegate → subtasks, up to depth limit of 3
+- Coordinator fee: 5% of subtask rewards to delegating agent
+- Auto-completion propagation (subtask verified → parent updated)
+- Depth 4+ correctly blocked with error response
+- 8 delegation scenarios tested and validated (3-level tree)
+
+### Duplicate Bounty Guard
+- Auto-rejects PRs targeting already-closed bounty issues
+- Prevents double-payouts and stale bounty claims
+
+### DexScreener Enhanced Token Info
+- Logo, description, website, Discord, X submitted and processed ($299)
+- Auto-displays on Raydium graduation
+
+### Discord Server Launch
+- Server live: https://discord.gg/gwveXtpAgx
+- "How to Earn WATT" welcome guide drafted
+
+### PR Activity
+- 8 PRs reviewed (2 merged, 6 rejected)
+- PR #94 (ohmygod20260203) — API Docs — merged (payout failed, no wallet in PR)
+- PR #100 (aybanda) — Node Earnings — merged + 5K WATT payout
+- 2 contributors flagged for spam PRs (ohmygod20260203, rossignoliluca)
+- Merit system successfully filtering low-quality submissions
+
+### Token Status
+- Bonding curve: 77% (~39.15 SOL)
+- ~5x price action, peaked at 82% before pullback
+- ~$36K to Raydium graduation
+
+### Contributors
+- Project Owner — Testing, coordination, liquidity push
+- Claude — Implementation
+
+---
+
 ## [February 7, 2026 - v3.2.1] - Discord Alerts, Activity Feed, Bounty Wave
 
 ### Discord Notifications
