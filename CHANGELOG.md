@@ -1,3 +1,49 @@
+## [February 6, 2026 - v3.1.0] - WattBot, Site Polish, Autonomous Bounties
+
+### WattBot LLM Endpoint (NEW)
+- **bridge_web.py**: `/api/v1/llm` — public pay-per-query AI endpoint (500 WATT)
+  - WattBot system prompt with full project context, services, links
+  - Payment verification via WATT transfer
+  - Prompt validation (max 4000 chars)
+  - Powers "Contact Our AI" on wattcoin.org landing page
+
+### Autonomous Bounty Milestones
+- **PR #86**: Webhook structured logging (5,000 WATT) — first fully autonomous bounty (zero human intervention)
+  - Request ID tracking, elapsed time logging, malformed payload validation
+- **PR #87**: Data backup module (15,000 WATT) — standalone `data_backup.py`
+  - SHA256 checksums, gzip backups, 7-day rotation, restore endpoints
+  - Flask blueprint with admin-protected API (not yet registered in app)
+
+### Discord Integration Validated
+- Payment notifications live in #alerts channel (green embeds with Solscan links)
+- 3 successful notifications: PR #86, PR #87 payments
+
+### First External Node Operator
+- Miami-Base-Sputnik registered and completed first job (70 WATT earned)
+- First organic WattNode adoption outside core team
+
+### Node System Improvements
+- **api_nodes.py**: Heartbeat now supports node name updates (name field, max 64 chars)
+- **bridge_web.py**: Node job timeout increased 30s → 60s for slower connections
+
+### Website Updates (wattcoin-web)
+- **Landing.jsx**: Discord link added to footer
+- **Landing.jsx**: "First Payout" stat replaced with live Active Nodes count from API
+- **Landing.jsx**: "Contact Our AI" section with WattBot CTA
+- **Navbar.jsx**: Logo squish fixed (added `object-contain`)
+- **Navbar.jsx**: Nav trimmed from 10 → 6 links (Home, Bounties, Nodes, Scraper, Leaderboard, Docs)
+
+### Documentation
+- **README.md**: All Grok references replaced with "AI"
+- **README.md**: Discord badge + link added, GitHub link added to links table
+
+### Contributors
+- Project Owner — Testing, debugging, coordination
+- Claude — Implementation
+- Clawbot — Autonomous PR contributions (PRs #86, #87)
+
+---
+
 ## [February 6, 2026 - v3.0.0] - Merit System V1 — Contributor Reputation Gating
 
 ### Merit System (NEW)
