@@ -1,3 +1,55 @@
+## [February 8, 2026 - v3.3.0] - SwarmSolve Phase 1, Dev Supply Lock, Bounty Quality
+
+### SwarmSolve Phase 1 — Escrow Bounty Marketplace (NEW)
+- New module: `api_swarmsolve.py` — 6 endpoints for customer-funded solution bounties
+- `POST /api/v1/solutions/prepare` — get slug + escrow wallet + memo format (step 1)
+- `POST /api/v1/solutions/submit` — verify on-chain escrow TX + create GitHub issue (step 2)
+- `GET /api/v1/solutions` — list solutions with `?status=` filter
+- `GET /api/v1/solutions/<id>` — solution detail view (public-safe, wallets masked)
+- `POST /api/v1/solutions/<id>/approve` — customer approves winner, 95% payout queued
+- `POST /api/v1/solutions/<id>/refund` — admin refund for expired solutions
+- On-chain TX verification: pre/post token balances + memo matching
+- Token-based customer auth (SHA-256 hashed, never stored plaintext)
+- 5% treasury fee on approved solutions
+- Auto-creates GitHub issues with `solution-bounty` label + escrow proof
+- Discord notifications for new solutions, approvals, and refunds
+- Data persisted to `/app/data/escrow_solutions.json`
+- Rate limited: 20 requests/min
+- End-to-end tested: prepare → escrow TX → submit → verify → refund
+
+### Dev Supply Lock (Transparency)
+- ~138.5M WATT locked in 24-month linear vesting via Streamflow
+- Contract: `FRtE5WJ1Q1RPVRRgbT9v9rqdb5p7XFfjzji4Uy5ZRySP`
+- 1,629,290 WATT (1% of dev holdings) donated to treasury
+- Verified on-chain: Streamflow program ownership + WATT mint + principal confirmed
+- Discord announcement with TX proofs
+
+### Bounty Quality Improvements
+- Issues #88 (Rate Limiting) and #90 (Health Check) updated with strict requirements
+- Added: Requirements section, Acceptance Criteria checklist, Auto-Reject rules
+- Auto-reject: standalone files, >200 lines, bundled bounties, unrelated tests
+- Template standardized for future bounties
+
+### Bounties Closed
+- Issue #91 (AI Retry, 5K WATT) — closed with payment proof
+- Issue #92 (Leaderboard, 3K WATT) — closed with payment proof
+
+### Bug Fix
+- Fixed cross-blueprint import error in SwarmSolve refund/approve endpoints
+- Payment queue now written directly instead of importing `queue_payment()`
+
+### Token Status
+- Price: ~$0.0000095 USD (+107% 24h)
+- Bonding curve: 77%
+- 24h volume: $35,613
+- Holders growing organically (10 → 25)
+
+### Contributors
+- Project Owner — Testing, coordination, transparency initiative
+- Claude — Implementation
+
+---
+
 ## [February 7, 2026 - v3.2.2] - Agent Delegation v2.0, Spam Guards, Community Launch
 
 ### Agent-to-Agent Delegation v2.0 (NEW)
@@ -636,7 +688,7 @@
 ## [January 31, 2026] - [20:30 UTC]
 - **Action**: Created
 - **File**: docs/AGENT_OSS_FRAMEWORK.md
-- **Summary**: Agent-Native OSS Framework spec. First agent-built OSS project. Covers: 10% stake to claim, 5K WATT min balance, tiered bounties (5K-500K WATT), AI + human review pipeline, anti-sybil/spam protections, wallet architecture, CI/CD, launch plan. New public repo (wattcoin-oss) to be created separately from cb3tech. Parked for launch prep.
+- **Summary**: Agent-Native OSS Framework spec. First agent-built OSS project. Covers: 10% stake to claim, 5K WATT min balance, tiered bounties (5K-500K WATT), AI + human review pipeline, anti-sybil/spam protections, wallet architecture, CI/CD, launch plan. New public repo (wattcoin-oss) to be created separately. Parked for launch prep.
 - **Requested by**: Team + Grok - "Built by agents, for agents" differentiator
 
 ## [January 31, 2026] - [19:45 UTC]
@@ -782,5 +834,6 @@
 
 ---
 *This changelog tracks all implementation changes to the WattCoin repository for audit purposes.*
+
 
 
