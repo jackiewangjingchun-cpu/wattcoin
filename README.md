@@ -5,6 +5,7 @@
 [![Website](https://img.shields.io/badge/Website-wattcoin.org-green)](https://wattcoin.org)
 [![Docs](https://img.shields.io/badge/Docs-API-blue)](https://wattcoin.org/docs)
 [![Twitter](https://img.shields.io/badge/Twitter-@WattCoin2026-1DA1F2)](https://x.com/WattCoin2026)
+[![Discord](https://img.shields.io/badge/Discord-Join-5865F2)](https://discord.gg/K3sWgQKk)
 
 ## 🚀 Token Info
 
@@ -27,6 +28,8 @@
 | DexScreener | https://dexscreener.com/solana/2ttcex2mcagk9iwu3ukcr8m5q61fop9qjdgvgasx5xtc |
 | Whitepaper | https://gateway.pinata.cloud/ipfs/bafkreihxfwy4mzk2kmyundq24p6p44cwarxcdxn5szjzzxtxy55nkmnjsq |
 | Twitter/X | https://x.com/WattCoin2026 |
+| Discord | https://discord.gg/K3sWgQKk |
+| GitHub | https://github.com/WattCoin-Org/wattcoin |
 
 ## ⚡ What is WattCoin?
 
