@@ -144,7 +144,7 @@ def send_watt_from_escrow(recipient: str, amount: int, memo: str = None) -> str:
         recent_blockhash
     )
 
-    signature = wallet.sign_message(msg.to_bytes())
+    signature = wallet.sign_message(bytes(msg))
     tx = Transaction([signature], msg)
 
     result = client.send_transaction(tx)
