@@ -521,6 +521,20 @@ def complete_job(job_id):
         else:
             payout_error = result_msg
     
+    # Activity feed: job completed (anonymized)
+    try:
+        from api_webhooks import notify_discord
+        job_type = job.get("type", "task")
+        reward = job.get("node_reward", 0)
+        notify_discord(
+            "📦 Job Completed",
+            f"**{job_type.title()}** job completed by node",
+            color=0x3498DB,
+            fields={"Reward": f"{reward:,} WATT" if reward else "N/A", "Status": payout_status.title()}
+        )
+    except ImportError:
+        pass
+    
     response = {
         "success": True,
         "job_id": job_id,
