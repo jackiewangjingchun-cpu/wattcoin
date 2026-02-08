@@ -1,6 +1,6 @@
 """
 WattCoin SuperIntelligence (WSI) - Phase 1: Distributed Inference
-Gateway API that routes queries to Petals swarm via seed/community nodes.
+Gateway API that routes queries to inference swarm via seed/community nodes.
 
 Endpoints:
 - POST /api/v1/wsi/query      - Submit inference query (requires 5K WATT hold)
@@ -29,7 +29,7 @@ wsi_bp = Blueprint('wsi', __name__)
 WATT_MINT = "Gpmbh4PoQnL1kNgpMYDED3iv4fczcr7d3qNBLf8rpump"
 SOLANA_RPC = "https://api.mainnet-beta.solana.com"
 
-# WSI Gateway — seed node running Petals client + HTTP gateway
+# WSI Gateway — seed node running inference client + HTTP gateway
 WSI_GATEWAY_URL = os.getenv("WSI_GATEWAY_URL", "")  # e.g. http://seed-node-ip:8090
 WSI_GATEWAY_TIMEOUT = int(os.getenv("WSI_GATEWAY_TIMEOUT", "120"))  # inference can be slow
 WSI_GATEWAY_KEY = os.getenv("WSI_GATEWAY_KEY", "")  # shared secret for node contribution reports
@@ -283,9 +283,9 @@ def queue_inference_payout(node_id, wallet, query_id, blocks_served):
 
 def query_gateway(prompt, model=None, max_tokens=500, temperature=0.7):
     """
-    Forward inference request to Petals gateway node.
+    Forward inference request to inference gateway node.
 
-    The gateway runs the Petals client which routes the query through
+    The gateway runs the inference client which routes the query through
     the distributed swarm of nodes hosting model layers.
 
     Returns: (result_dict, error_string)
@@ -431,7 +431,7 @@ def wsi_query():
             "queries_limit": limit
         }), 429
 
-    # Forward to Petals gateway
+    # Forward to inference gateway
     start_time = time.time()
     result, error = query_gateway(prompt, model=model, max_tokens=max_tokens, temperature=temperature)
     latency_ms = int((time.time() - start_time) * 1000)
@@ -610,7 +610,7 @@ def wsi_info():
         "system": "WattCoin SuperIntelligence (WSI)",
         "version": "2.0.0",
         "phase": "Phase 1: Distributed Inference",
-        "architecture": "Petals swarm — model layers distributed across WattNode operators",
+        "architecture": "Distributed swarm — model layers distributed across WattNode operators",
         "requirements": {
             "min_balance": MIN_WATT_BALANCE,
             "daily_limit": DAILY_QUERY_LIMIT,
@@ -660,7 +660,7 @@ def wsi_models():
 def wsi_contribute():
     """
     Node reports inference contribution after serving blocks.
-    Called by the Petals gateway or WattNode after completing inference work.
+    Called by the inference gateway or WattNode after completing inference work.
 
     Body:
     {
