@@ -510,7 +510,7 @@ DASHBOARD_TEMPLATE = """
         <div class="flex justify-between items-center mb-4">
             <div>
                 <h1 class="text-2xl font-bold text-green-400">⚡ WattCoin Admin</h1>
-                <p class="text-gray-500 text-sm">v3.4.0 | PR Reviews & Bounty Payouts | Pass threshold: ≥9/10</p>
+                <p class="text-gray-500 text-sm">v3.8.0 | PR Reviews & Bounty Payouts | Pass threshold: ≥9/10</p>
             </div>
             <div class="flex items-center gap-3">
                 <!-- System Health -->
@@ -590,6 +590,25 @@ DASHBOARD_TEMPLATE = """
             <div class="bg-gray-800 rounded-lg p-4">
                 <div class="text-3xl font-bold text-red-400">{{ stats.rejected }}</div>
                 <div class="text-gray-500 text-sm">Rejected</div>
+            </div>
+        </div>
+        
+        <!-- Payment Queue Detail -->
+        <div id="queue-detail-section" class="mb-8" style="display:none;">
+            <div class="flex justify-between items-center mb-3">
+                <h2 class="text-lg font-semibold text-yellow-400">⏳ Pending Payments</h2>
+                <button onclick="processQueue()" class="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-sm font-bold rounded transition">
+                    ⚡ Process All
+                </button>
+            </div>
+            <div id="queue-items" class="space-y-2"></div>
+        </div>
+        
+        <!-- Open Bounties -->
+        <div class="mb-8">
+            <h2 class="text-lg font-semibold mb-3">📋 Open Bounties</h2>
+            <div id="bounties-section">
+                <div class="text-gray-500 text-sm">Loading bounties...</div>
             </div>
         </div>
         
@@ -853,8 +872,83 @@ DASHBOARD_TEMPLATE = """
         checkHealth();
         checkWebhooks();
         loadSwarmSolve();
+        loadQueueDetail();
+        loadBounties();
         setInterval(checkHealth, 30000);
         setInterval(checkWebhooks, 30000);
+        setInterval(loadQueueDetail, 30000);
+        
+        async function loadQueueDetail() {
+            const section = document.getElementById('queue-detail-section');
+            const items = document.getElementById('queue-items');
+            try {
+                const resp = await fetch('{{ url_for("admin.api_queue") }}');
+                const data = await resp.json();
+                const pending = data.pending || [];
+                
+                if (pending.length === 0) {
+                    section.style.display = 'none';
+                    return;
+                }
+                
+                section.style.display = 'block';
+                let html = '';
+                for (const p of pending) {
+                    const wallet = p.wallet || '';
+                    const short = wallet.length > 12 ? wallet.substring(0,4) + '...' + wallet.slice(-4) : wallet;
+                    const age = p.queued_ago || '';
+                    html += '<div class="bg-yellow-900/20 border border-yellow-700 rounded-lg px-4 py-3 flex justify-between items-center">';
+                    html += '<div>';
+                    html += '<span class="text-yellow-400 font-medium">PR #' + p.pr_number + '</span>';
+                    html += ' → <code class="text-gray-400 text-xs">' + short + '</code>';
+                    html += ' • <span class="text-white font-bold">' + (p.amount ? p.amount.toLocaleString() : '?') + ' WATT</span>';
+                    if (p.author) html += ' • <span class="text-gray-500">@' + p.author + '</span>';
+                    html += '</div>';
+                    html += '<div class="text-gray-500 text-xs">' + age + '</div>';
+                    html += '</div>';
+                }
+                items.innerHTML = html;
+            } catch (err) {
+                section.style.display = 'none';
+            }
+        }
+        
+        async function loadBounties() {
+            const section = document.getElementById('bounties-section');
+            try {
+                const resp = await fetch('{{ url_for("admin.api_bounties") }}');
+                const data = await resp.json();
+                const bounties = data.bounties || [];
+                
+                if (bounties.length === 0) {
+                    section.innerHTML = '<div class="bg-gray-800 rounded-lg p-4 text-center text-gray-500 text-sm">No open bounties</div>';
+                    return;
+                }
+                
+                let html = '<div class="space-y-2">';
+                for (const b of bounties) {
+                    const labels = (b.labels || []).filter(l => l !== 'bounty');
+                    html += '<div class="bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 flex justify-between items-center">';
+                    html += '<div>';
+                    html += '<a href="' + b.url + '" target="_blank" class="text-blue-400 hover:underline font-medium">';
+                    html += '#' + b.number + ' ' + (b.title || 'Untitled') + '</a>';
+                    if (b.amount) html += ' • <span class="text-green-400 font-bold">' + b.amount.toLocaleString() + ' WATT</span>';
+                    for (const l of labels) {
+                        html += ' <span class="px-1.5 py-0.5 bg-gray-700 text-gray-400 rounded text-xs">' + l + '</span>';
+                    }
+                    html += '</div>';
+                    html += '<div class="text-gray-500 text-xs">';
+                    if (b.claimed_by) html += '🎯 ' + b.claimed_by;
+                    else html += '⏳ Unclaimed';
+                    html += '</div>';
+                    html += '</div>';
+                }
+                html += '</div>';
+                section.innerHTML = html;
+            } catch (err) {
+                section.innerHTML = '<div class="bg-gray-800 rounded-lg p-4 text-red-400 text-sm">Failed to load bounties: ' + err.message + '</div>';
+            }
+        }
         
         async function loadSwarmSolve() {
             const section = document.getElementById('swarmsolve-section');
@@ -893,6 +987,7 @@ DASHBOARD_TEMPLATE = """
                     html += 'ID: ' + (s.id || '-').substring(0, 12) + '... ';
                     html += '• Budget: ' + (s.budget_watt ? s.budget_watt.toLocaleString() : '?') + ' WATT ';
                     if (s.deadline_date) html += '• Deadline: ' + s.deadline_date;
+                    if (s.claim_count !== undefined && s.status === 'open') html += ' • Claims: ' + s.claim_count + '/' + (s.max_claims || 5);
                     html += '</div>';
                     html += '</div>';
                     html += '<div class="flex items-center gap-2">';
@@ -2806,6 +2901,118 @@ def reject_submission(sub_id):
             return redirect(url_for('admin.submissions', message=f"Submission {sub_id[:12]}... rejected"))
     
     return redirect(url_for('admin.submissions', error="Submission not found"))
+
+
+# =============================================================================
+# ADMIN API ENDPOINTS (Dashboard Data)
+# =============================================================================
+
+@admin_bp.route('/api/queue')
+@login_required
+def api_queue():
+    """Return pending payment queue items for dashboard display."""
+    import json as _json
+    import os as _os
+    
+    queue_file = "/app/data/payment_queue.json"
+    
+    if not _os.path.exists(queue_file):
+        return jsonify({"pending": [], "count": 0})
+    
+    try:
+        with open(queue_file, 'r') as f:
+            queue = _json.load(f)
+    except:
+        return jsonify({"pending": [], "count": 0})
+    
+    pending = []
+    for p in queue:
+        if p.get("status") != "pending":
+            continue
+        
+        # Calculate age
+        queued_at = p.get("queued_at", "")
+        age_str = ""
+        if queued_at:
+            try:
+                from datetime import datetime as _dt
+                queued_dt = _dt.fromisoformat(queued_at)
+                delta = _dt.utcnow() - queued_dt
+                mins = int(delta.total_seconds() / 60)
+                if mins < 60:
+                    age_str = f"{mins}m ago"
+                elif mins < 1440:
+                    age_str = f"{mins // 60}h ago"
+                else:
+                    age_str = f"{mins // 1440}d ago"
+            except:
+                age_str = ""
+        
+        pending.append({
+            "pr_number": p.get("pr_number"),
+            "wallet": p.get("wallet", ""),
+            "amount": p.get("amount"),
+            "author": p.get("author"),
+            "bounty_issue_id": p.get("bounty_issue_id"),
+            "review_score": p.get("review_score"),
+            "queued_at": queued_at,
+            "queued_ago": age_str,
+            "manual": p.get("manual", False)
+        })
+    
+    return jsonify({"pending": pending, "count": len(pending)})
+
+
+@admin_bp.route('/api/bounties')
+@login_required
+def api_bounties():
+    """Return open bounty issues from GitHub for dashboard display."""
+    import requests as req
+    
+    try:
+        resp = req.get(
+            f"https://api.github.com/repos/{REPO}/issues",
+            headers=github_headers(),
+            params={"labels": "bounty", "state": "open", "per_page": 20},
+            timeout=10
+        )
+        
+        if resp.status_code != 200:
+            return jsonify({"bounties": [], "error": f"GitHub API: {resp.status_code}"})
+        
+        issues = resp.json()
+        bounties = []
+        
+        for issue in issues:
+            title = issue.get("title", "")
+            body = issue.get("body", "") or ""
+            labels = [l.get("name", "") for l in issue.get("labels", [])]
+            
+            # Extract WATT amount
+            import re
+            watt_match = re.search(r'([\d,]+)\s*WATT', body + " " + title, re.IGNORECASE)
+            amount = int(watt_match.group(1).replace(",", "")) if watt_match and watt_match.group(1).replace(",", "").isdigit() else None
+            
+            # Check for claims in assignees
+            assignees = [a.get("login") for a in issue.get("assignees", [])]
+            claimed_by = assignees[0] if assignees else None
+            
+            bounties.append({
+                "number": issue.get("number"),
+                "title": title,
+                "url": issue.get("html_url"),
+                "labels": labels,
+                "amount": amount,
+                "claimed_by": claimed_by,
+                "created_at": issue.get("created_at", "")[:10]
+            })
+        
+        return jsonify({"bounties": bounties, "count": len(bounties)})
+    
+    except Exception as e:
+        print(f"[ADMIN] Bounties API error: {e}", flush=True)
+        return jsonify({"bounties": [], "error": str(e)})
+
 
 # =============================================================================
 # BAN MANAGEMENT
