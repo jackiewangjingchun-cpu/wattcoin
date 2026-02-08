@@ -48,7 +48,7 @@ admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
 # Config
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
-AI_API_KEY = os.getenv("AI_API_KEY", "")
+AI_API_KEY = os.getenv("AI_REVIEW_API_KEY", "")
 REPO = "WattCoin-Org/wattcoin"
 BOUNTY_WALLET_ADDRESS = os.getenv("BOUNTY_WALLET_ADDRESS", "7vvNkG3JF3JpxLEavqZSkc5T3n9hHR98Uw23fbWdXVSF")
 DATA_FILE = "/app/data/bounty_reviews.json"
@@ -424,30 +424,17 @@ Output in this exact format:
 """
 
     try:
-        resp = requests.post(
-            "https://api.x.ai/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {AI_API_KEY}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": "grok-4-1-fast-reasoning",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.2,
-                "max_tokens": 1500
-            },
-            timeout=60
-        )
+        from ai_provider import call_ai
+        content, ai_error = call_ai(prompt, temperature=0.2, max_tokens=1500, timeout=60)
         
-        if resp.status_code == 200:
-            content = resp.json()["choices"][0]["message"]["content"]
-            return {
-                "success": True,
-                "review": content,
-                "timestamp": datetime.now().isoformat()
-            }
-        else:
-            return {"error": f"AI API error: {resp.status_code}"}
+        if ai_error:
+            return {"error": ai_error}
+        
+        return {
+            "success": True,
+            "review": content,
+            "timestamp": datetime.now().isoformat()
+        }
     except Exception as e:
         return {"error": f"AI request failed: {str(e)}"}
 
@@ -2226,11 +2213,11 @@ SUBMISSIONS_HTML = """
                         <td class="py-3 font-mono text-xs">{{ sub.wallet[:8] }}...</td>
                         <td class="py-3 text-right text-green-400">{{ "{:,}".format(sub.amount) }} WATT</td>
                         <td class="py-3">
-                            {% if sub.grok_review %}
-                                {% if sub.grok_review.pass %}
-                                    <span class="text-green-400">✓ {{ (sub.grok_review.confidence * 100)|int }}%</span>
+                            {% if sub.ai_review %}
+                                {% if sub.ai_review.pass %}
+                                    <span class="text-green-400">✓ {{ (sub.ai_review.confidence * 100)|int }}%</span>
                                 {% else %}
-                                    <span class="text-red-400">✗ {{ (sub.grok_review.confidence * 100)|int }}%</span>
+                                    <span class="text-red-400">✗ {{ (sub.ai_review.confidence * 100)|int }}%</span>
                                 {% endif %}
                             {% else %}
                                 <span class="text-gray-500">-</span>
@@ -2255,8 +2242,8 @@ SUBMISSIONS_HTML = """
                             <details class="text-xs">
                                 <summary class="cursor-pointer text-gray-400 hover:text-gray-200">View result</summary>
                                 <pre class="mt-2 p-2 bg-black rounded overflow-x-auto text-green-400">{{ sub.result | tojson(indent=2) }}</pre>
-                                {% if sub.grok_review and sub.grok_review.reason %}
-                                <p class="mt-2 text-gray-400"><strong>AI:</strong> {{ sub.grok_review.reason }}</p>
+                                {% if sub.ai_review and sub.ai_review.reason %}
+                                <p class="mt-2 text-gray-400"><strong>AI:</strong> {{ sub.ai_review.reason }}</p>
                                 {% endif %}
                             </details>
                         </td>
@@ -2337,7 +2324,7 @@ SUBMISSIONS_HTML = """
                         </td>
                         <td class="py-3 font-mono text-xs">{{ sub.wallet[:8] }}...</td>
                         <td class="py-3 text-gray-400 text-xs">
-                            {{ sub.grok_review.reason[:60] if sub.grok_review else sub.get('reject_reason', '-') }}...
+                            {{ sub.ai_review.reason[:60] if sub.ai_review else sub.get('reject_reason', '-') }}...
                         </td>
                         <td class="py-3 text-gray-500 text-xs">{{ sub.submitted_at[:10] }}</td>
                     </tr>
