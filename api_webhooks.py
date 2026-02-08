@@ -939,7 +939,70 @@ def handle_pr_review_trigger(pr_number, action):
         print(f"[WALLET-GATE] PR #{pr_number} blocked — no wallet in PR body", flush=True)
         return jsonify({"message": "Wallet required in PR body"}), 200
     
-    # === DUPLICATE BOUNTY GUARD ===
+    # === CONTENT SECURITY GATE ===
+    # Scans PR diff for wallet injection, fabricated mechanisms, internal URL leaks
+    try:
+        import requests as req
+        diff_resp = req.get(
+            f"https://api.github.com/repos/{REPO}/pulls/{pr_number}",
+            headers={**github_headers(), "Accept": "application/vnd.github.v3.diff"},
+            timeout=15
+        )
+        pr_diff = diff_resp.text if diff_resp.status_code == 200 else ""
+        
+        files_resp = req.get(
+            f"https://api.github.com/repos/{REPO}/pulls/{pr_number}/files",
+            headers=github_headers(), timeout=10
+        )
+        pr_files = files_resp.json() if files_resp.status_code == 200 else []
+        
+        from content_security import scan_pr_content, format_flags_for_log
+        scan_passed, scan_flags = scan_pr_content(pr_diff, pr_files, submitter_wallet=wallet)
+        
+        if not scan_passed:
+            # Log full details internally
+            flag_details = format_flags_for_log(scan_flags)
+            log_security_event("pr_content_security_failed", {
+                "pr_number": pr_number,
+                "author": pr_author,
+                "flags": [f["type"] for f in scan_flags],
+                "details": flag_details
+            })
+            
+            # Generic comment — do NOT reveal what was detected
+            post_github_comment(
+                pr_number,
+                "## 🛡️ Content Security Review — Manual Review Required\n\n"
+                "This PR has been flagged by automated content analysis and requires admin review "
+                "before AI evaluation can proceed.\n\n"
+                "If you believe this is an error, please wait for an admin to review.\n\n"
+                "— WattCoin Automated Review"
+            )
+            
+            # Notify Discord with details (private channel)
+            flag_types = ", ".join(set(f["type"] for f in scan_flags))
+            severity = "CRITICAL" if any(f["severity"] == "critical" for f in scan_flags) else "HIGH"
+            notify_discord(
+                f"🛡️ Content Security Flag — {severity}",
+                f"PR #{pr_number} by @{pr_author} flagged: {flag_types}",
+                color=0xFF0000,
+                fields={"PR": f"#{pr_number}", "Author": pr_author, "Flags": flag_types}
+            )
+            
+            print(f"[CONTENT-SECURITY] PR #{pr_number} flagged — {flag_types}", flush=True)
+            return jsonify({"message": "Content security flag", "pr": pr_number}), 200
+        else:
+            print(f"[CONTENT-SECURITY] PR #{pr_number} passed content scan", flush=True)
+    except Exception as e:
+        # Fail-open for content scan (don't block PRs if scanner crashes)
+        # But log the error
+        print(f"[CONTENT-SECURITY] Error scanning PR #{pr_number}: {e}", flush=True)
+        log_security_event("content_security_error", {
+            "pr_number": pr_number,
+            "error": str(e)
+        })
+    
+        # === DUPLICATE BOUNTY GUARD ===
     is_duplicate, issue_number, dup_reason = check_duplicate_bounty(pr_number)
     if is_duplicate:
         comment = (
