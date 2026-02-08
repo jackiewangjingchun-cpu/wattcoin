@@ -1,3 +1,20 @@
+## [February 8, 2026 - v3.9.0] - Node Reliability Scoring
+
+### WattNode Reliability System (NEW)
+- **Reliability Scoring** — nodes scored 0-100 based on uptime (40pts), completion rate (40pts), volume bonus (20pts)
+- **Tier System** — Bronze (0-39), Silver (40-69, +5% payout), Gold (70-100, +15% payout)
+- **Tier Payout Bonuses** — higher-tier nodes earn bonus WATT on job completion, paid automatically
+- **Priority Job Routing** — `get_active_nodes()` now sorts by reliability score, highest-scoring nodes get jobs first
+- **Tier Promotion Notifications** — Discord alerts when nodes promote to Silver or Gold
+- **Reliability on Heartbeat** — score recalculated on every heartbeat to stay current
+- **API Exposure** — `GET /api/v1/nodes`, `GET /api/v1/nodes/:id`, `GET /api/v1/stats` all include reliability_score, tier, and tier distribution
+- Node registration defaults to Bronze tier with 20.0 initial score
+- Health check version bumped to 3.1.0
+
+### Contributors
+- Project Owner — Requirements
+- Claude — Implementation
+
 ## [February 8, 2026 - v3.8.0] - Admin Dashboard Enhancements
 
 ### Admin Dashboard v3.8.0 (NEW)
