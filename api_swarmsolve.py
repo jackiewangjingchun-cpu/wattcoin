@@ -1216,3 +1216,52 @@ def refund_solution(solution_id):
     except Exception as e:
         print(f"[SWARMSOLVE] Refund error: {e}", flush=True)
         return jsonify({"error": "Internal error"}), 500
+
+
+# =============================================================================
+# ADMIN: ARCHIVE/DELETE SOLUTIONS
+# =============================================================================
+
+@swarmsolve_bp.route('/api/v1/solutions/archive', methods=['POST'])
+def archive_solutions():
+    """
+    Admin-only: Archive (remove) solutions from the list.
+    
+    Body: { "admin_key": "<key>", "solution_ids": ["id1", "id2"] }
+    Or:   { "admin_key": "<key>", "archive_completed": true }  — archives all non-open
+    """
+    data = request.get_json() or {}
+    admin_key = (data.get("admin_key") or "").strip()
+    expected_admin = os.getenv("ADMIN_API_KEY", "").strip()
+
+    if not expected_admin or admin_key != expected_admin:
+        return jsonify({"error": "Unauthorized — admin_key required"}), 403
+
+    solutions_data = load_solutions()
+    solutions = solutions_data.get("solutions", [])
+    original_count = len(solutions)
+
+    solution_ids = data.get("solution_ids", [])
+    archive_completed = data.get("archive_completed", False)
+
+    if solution_ids:
+        # Archive specific IDs
+        archived = [s["id"] for s in solutions if s["id"] in solution_ids]
+        solutions = [s for s in solutions if s["id"] not in solution_ids]
+    elif archive_completed:
+        # Archive all non-open solutions
+        archived = [s["id"] for s in solutions if s["status"] != "open"]
+        solutions = [s for s in solutions if s["status"] == "open"]
+    else:
+        return jsonify({"error": "Provide solution_ids or archive_completed:true"}), 400
+
+    solutions_data["solutions"] = solutions
+    save_solutions(solutions_data)
+
+    print(f"[SWARMSOLVE] Archived {len(archived)} solutions (admin)", flush=True)
+
+    return jsonify({
+        "message": f"Archived {len(archived)} solutions",
+        "archived": archived,
+        "remaining": len(solutions)
+    }), 200
