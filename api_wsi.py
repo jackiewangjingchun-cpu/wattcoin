@@ -46,8 +46,9 @@ WSI_USAGE_FILE = f"{DATA_DIR}/wsi_usage.json"
 WSI_CONTRIBUTIONS_FILE = f"{DATA_DIR}/wsi_contributions.json"
 WSI_PAYOUT_QUEUE_FILE = f"{DATA_DIR}/wsi_payout_queue.json"
 
-# Payout config
-NODE_REWARD_PER_QUERY = 50  # WATT per query served (split across contributing nodes)
+# Payout config (configurable via env vars)
+WSI_QUERY_COST = int(os.environ.get('WSI_QUERY_COST', '50'))            # Total WATT cost per query
+WSI_NODE_PAYOUT_PCT = int(os.environ.get('WSI_NODE_PAYOUT_PCT', '70'))  # % to node operator (remainder to treasury)
 
 # =============================================================================
 # BALANCE CHECKING
@@ -203,12 +204,18 @@ def queue_inference_payout(node_id, wallet, query_id, blocks_served):
     """Add inference payout to queue for batch processing."""
     queue = load_json(WSI_PAYOUT_QUEUE_FILE, {"pending": [], "processed": []})
 
+    node_reward = WSI_QUERY_COST * WSI_NODE_PAYOUT_PCT // 100
+    treasury_share = WSI_QUERY_COST - node_reward
+
     queue["pending"].append({
         "node_id": node_id,
         "wallet": wallet,
         "query_id": query_id,
         "blocks_served": blocks_served,
-        "reward_watt": NODE_REWARD_PER_QUERY,  # TODO: proportional split for multi-node
+        "reward_watt": node_reward,
+        "treasury_watt": treasury_share,
+        "query_cost": WSI_QUERY_COST,
+        "payout_pct": WSI_NODE_PAYOUT_PCT,
         "queued_at": time.time(),
         "date": datetime.utcnow().isoformat() + "Z",
         "status": "pending"
@@ -623,13 +630,13 @@ def wsi_contribute():
         "🧠 WSI Inference Contribution",
         f"Node `{node_id[:16]}` served {blocks_served} blocks for query `{query_id}`",
         color=0x9B59B6,
-        fields={"Model": model, "Latency": f"{latency_ms}ms", "Reward": f"{NODE_REWARD_PER_QUERY} WATT"}
+        fields={"Model": model, "Latency": f"{latency_ms}ms", "Reward": f"{WSI_QUERY_COST * WSI_NODE_PAYOUT_PCT // 100} WATT ({WSI_NODE_PAYOUT_PCT}%)"}
     )
 
     return jsonify({
         "success": True,
         "message": "Contribution recorded and payout queued",
-        "reward_watt": NODE_REWARD_PER_QUERY
+        "reward_watt": WSI_QUERY_COST * WSI_NODE_PAYOUT_PCT // 100
     }), 200
 
 
