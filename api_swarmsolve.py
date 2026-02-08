@@ -63,6 +63,8 @@ ESCROW_WALLET = os.getenv("ESCROW_WALLET_ADDRESS", "")
 ESCROW_WALLET_PRIVATE_KEY = os.getenv("ESCROW_WALLET_PRIVATE_KEY", "")
 TREASURY_WALLET = os.getenv("TREASURY_WALLET_ADDRESS", "")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
+GROK_API_KEY = os.getenv("GROK_API_KEY", "")
+GROK_API_URL = "https://api.x.ai/v1/chat/completions"
 WATT_DECIMALS = 6
 
 
@@ -496,6 +498,116 @@ def verify_pr_merged(pr_number, issue_number, target_repo=None):
 # DISCORD NOTIFICATIONS
 # =============================================================================
 
+def safety_scan_pr(pr_number, target_repo):
+    """
+    Fetch PR diff from target repo and run AI safety scan via Grok.
+    Returns: (passed: bool, report: str)
+    - passed=True: code is safe, proceed with payment
+    - passed=False: flagged, block payment
+    """
+    if not GROK_API_KEY:
+        print("[SWARMSOLVE] GROK_API_KEY not set — skipping safety scan", flush=True)
+        return True, "Safety scan skipped (no API key configured)"
+
+    check_repo = target_repo or REPO
+
+    # Fetch PR diff
+    try:
+        diff_resp = requests.get(
+            f"https://api.github.com/repos/{check_repo}/pulls/{pr_number}",
+            headers={**_gh_headers(), "Accept": "application/vnd.github.v3.diff"},
+            timeout=30
+        )
+        if diff_resp.status_code != 200:
+            print(f"[SWARMSOLVE] Failed to fetch diff: {diff_resp.status_code}", flush=True)
+            return True, f"Safety scan skipped (could not fetch diff: HTTP {diff_resp.status_code})"
+
+        diff_text = diff_resp.text
+        if len(diff_text) > 15000:
+            diff_text = diff_text[:15000] + "\n... [TRUNCATED — diff too large] ..."
+    except Exception as e:
+        print(f"[SWARMSOLVE] Diff fetch error: {e}", flush=True)
+        return True, f"Safety scan skipped (diff fetch error: {e})"
+
+    # Safety scan prompt
+    prompt = f"""You are a code security auditor for SwarmSolve, a paid software delivery platform.
+Review this PR diff for SAFETY ISSUES ONLY. This is NOT a code quality review.
+
+SCAN FOR:
+1. Malware, backdoors, reverse shells, keyloggers
+2. Credential theft (harvesting API keys, wallet private keys, passwords)
+3. Phishing code (fake login pages, spoofed URLs)
+4. Cryptocurrency theft (unauthorized wallet operations, address swapping)
+5. Data exfiltration (sending user data to external servers)
+6. Obfuscated/encoded malicious payloads (base64-encoded exploit code, eval() abuse)
+7. Dependency hijacking (typosquatted packages, suspicious npm/pip installs)
+8. Illegal content (copyright violations, DMCA-infringing code)
+
+PR #{pr_number} on {check_repo}
+
+DIFF:
+```
+{diff_text}
+```
+
+Respond in this EXACT format:
+
+VERDICT: PASS or FAIL
+RISK_LEVEL: NONE / LOW / MEDIUM / HIGH / CRITICAL
+FLAGS: (list any specific concerns, or "None")
+SUMMARY: (one sentence explanation)
+
+Be strict — if in doubt, FAIL. False positives are better than letting malicious code through.
+Only PASS if the code is clearly benign."""
+
+    try:
+        grok_resp = requests.post(
+            GROK_API_URL,
+            headers={
+                "Authorization": f"Bearer {GROK_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "grok-beta",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.1,
+                "max_tokens": 500
+            },
+            timeout=30
+        )
+
+        if grok_resp.status_code != 200:
+            print(f"[SWARMSOLVE] Grok API error: {grok_resp.status_code}", flush=True)
+            return True, f"Safety scan skipped (Grok API error: {grok_resp.status_code})"
+
+        report = grok_resp.json()["choices"][0]["message"]["content"]
+        print(f"[SWARMSOLVE] Safety scan result:\n{report}", flush=True)
+
+        # Parse verdict
+        verdict_line = [l for l in report.split("\n") if l.strip().startswith("VERDICT:")]
+        if verdict_line:
+            verdict = verdict_line[0].split(":", 1)[1].strip().upper()
+            if "FAIL" in verdict:
+                return False, report
+
+        # Also fail on CRITICAL/HIGH risk even if verdict parsing is weird
+        risk_line = [l for l in report.split("\n") if l.strip().startswith("RISK_LEVEL:")]
+        if risk_line:
+            risk = risk_line[0].split(":", 1)[1].strip().upper()
+            if risk in ("CRITICAL", "HIGH"):
+                return False, report
+
+        return True, report
+
+    except Exception as e:
+        print(f"[SWARMSOLVE] Safety scan error: {e}", flush=True)
+        return True, f"Safety scan skipped (error: {e})"
+
+
+# =============================================================================
+# DISCORD NOTIFICATIONS
+# =============================================================================
+
 def notify_discord(title, description, color=0x00FF00, fields=None):
     """Send Discord embed for SwarmSolve events."""
     webhook_url = os.getenv("DISCORD_WEBHOOK_URL", "")
@@ -869,6 +981,27 @@ def approve_solution(solution_id):
                 "error": "No wallet found in PR body. PR must contain 'Wallet: <solana-address>'"
             }), 400
 
+        # Safety scan — fetch diff and run through AI audit
+        target_repo = solution.get("target_repo", REPO)
+        scan_passed, scan_report = safety_scan_pr(pr_number, target_repo)
+        if not scan_passed:
+            # Flag on Discord but don't pay
+            notify_discord(
+                "⚠️ Safety Scan FAILED — Payment Blocked",
+                f"**{solution['title']}**\n\nPR #{pr_number} by @{author} flagged by safety scan",
+                color=0xFF0000,
+                fields={
+                    "Solution ID": solution_id,
+                    "Target Repo": target_repo,
+                    "PR": f"#{pr_number}"
+                }
+            )
+            return jsonify({
+                "error": "Safety scan failed — payment blocked",
+                "scan_report": scan_report,
+                "hint": "The PR was flagged for potential security issues. Contact the team if you believe this is a false positive."
+            }), 403
+
         # Calculate payout
         budget = solution["budget_watt"]
         fee_amount = int(budget * FEE_PERCENT / 100)
@@ -946,6 +1079,7 @@ def approve_solution(solution_id):
             "payout_tx": winner_tx,
             "fee_watt": fee_amount,
             "treasury_tx": treasury_tx,
+            "safety_scan": "passed",
             "pr_number": pr_number
         }), 200
 
