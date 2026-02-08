@@ -1022,6 +1022,50 @@ def handle_pr_review_trigger(pr_number, action):
         can_merge, tier, reason = should_auto_merge(pr_author, score)
         
         if can_merge:
+            # === SECURITY SCAN GATE (fail-closed) ===
+            from pr_security import ai_security_scan_pr
+            scan_passed, scan_report, scan_ran = ai_security_scan_pr(pr_number)
+            
+            if not scan_passed:
+                if scan_ran:
+                    # AI flagged the code as dangerous
+                    post_github_comment(
+                        pr_number,
+                        f"## 🛡️ Security Scan Failed — Merge Blocked\n\n"
+                        f"**AI Score**: {score}/10 ✅\n"
+                        f"**Security Scan**: ❌ FAILED\n\n"
+                        f"```\n{scan_report[:500]}\n```\n\n"
+                        f"This PR has been flagged by the automated security audit. "
+                        f"An admin will review manually."
+                    )
+                    notify_discord(
+                        "🛡️ Security Scan FAILED",
+                        f"PR #{pr_number} by @{pr_author} flagged by AI security audit.",
+                        color=0xFF0000,
+                        fields={"PR": f"#{pr_number}", "Author": pr_author, "AI Score": f"{score}/10"}
+                    )
+                else:
+                    # Scan couldn't run — fail-closed
+                    post_github_comment(
+                        pr_number,
+                        f"## ⚠️ Security Scan Unavailable — Merge Blocked\n\n"
+                        f"**AI Score**: {score}/10 ✅\n"
+                        f"**Security Scan**: ⚠️ UNAVAILABLE\n\n"
+                        f"The automated security audit could not run. Merge is blocked until scan completes.\n\n"
+                        f"*Reason: {scan_report}*"
+                    )
+                
+                log_security_event("pr_blocked_security_scan", {
+                    "pr_number": pr_number,
+                    "scan_ran": scan_ran,
+                    "author": pr_author,
+                    "report": scan_report[:300]
+                })
+                
+                return jsonify({"message": "Security scan blocked merge", "pr": pr_number}), 200
+            
+            print(f"[SECURITY] PR #{pr_number} passed security scan", flush=True)
+            
             # Attempt auto-merge
             merged, merge_error = auto_merge_pr(pr_number, score)
             
