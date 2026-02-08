@@ -1,3 +1,23 @@
+## [February 8, 2026 - v3.10.0] - AI Review Rate Limiting
+
+### AI Review Rate Limiting (NEW)
+- **Max 5 reviews per PR** — after 5 AI reviews, contributors must close and open a new PR for fresh reviews
+- **15-minute cooldown** — pushes within 15 min of last review are blocked with countdown timer
+- **Rate limit tracking** — stored in data/pr_rate_limits.json (per-PR count + last review timestamp)
+- **Rate limit gate** — inserted before AI review trigger in webhook pipeline (after ban/wallet/duplicate gates)
+- **Review recording** — every triggered review (pass or fail) counts against the limit
+- Prevents API credit abuse from spam-pushing commits (PR #125 triggered 15 reviews in one session)
+
+### Security Actions
+- **Banned EugeneJarvis88** — bounty farming (2-day-old account, all repos fake/empty, multiple low-quality PRs)
+- **Closed PR #131** — EugeneJarvis88, rate limiting bounty #88 (3/10)
+- **Closed PR #130** — EugeneJarvis88, health endpoint bounty #90 (4-6/10)
+- **Closed PR #125** — mccoychang, rate limiting bounty #88 (9→4/10 after 15 review cycles)
+
+### Contributors
+- Project Owner — Requirements
+- Claude — Implementation
+
 ## [February 8, 2026 - v3.9.0] - Node Reliability Scoring
 
 ### WattNode Reliability System (NEW)
