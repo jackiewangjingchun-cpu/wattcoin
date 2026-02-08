@@ -1,11 +1,16 @@
 """
-WattCoin Bounty Admin Dashboard - Blueprint v2.1.0
+WattCoin Bounty Admin Dashboard - Blueprint v2.2.0
 Admin routes for managing bounty PR reviews.
 
 Requires env vars:
     ADMIN_PASSWORD - Dashboard login password
     AI_REVIEW_KEY - For PR reviews
     GITHUB_TOKEN - For GitHub API calls
+
+v2.2.0 Changes:
+- Ban management: /admin/ban/<username>, /admin/unban/<username>
+- API ban endpoint: /admin/api/ban/<username>
+- Banned users stored in /app/data/banned_users.json
 
 v2.1.0 Changes:
 - System health status light on dashboard header
@@ -2443,4 +2448,66 @@ def reject_submission(sub_id):
             return redirect(url_for('admin.submissions', message=f"Submission {sub_id[:12]}... rejected"))
     
     return redirect(url_for('admin.submissions', error="Submission not found"))
+
+# =============================================================================
+# BAN MANAGEMENT
+# =============================================================================
+
+def _load_banned_users():
+    """Load banned users from data file."""
+    banned_file = os.path.join("/app/data", "banned_users.json")
+    try:
+        with open(banned_file, 'r') as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {"banned": [], "updated": None}
+
+def _save_banned_users(data):
+    """Save banned users to data file."""
+    banned_file = os.path.join("/app/data", "banned_users.json")
+    os.makedirs("/app/data", exist_ok=True)
+    with open(banned_file, 'w') as f:
+        json.dump(data, f, indent=2)
+
+@admin_bp.route('/ban/<username>', methods=['POST'])
+@login_required
+def ban_user(username):
+    """Ban a GitHub user from the bounty system."""
+    data = _load_banned_users()
+    banned_list = [u.lower() for u in data.get("banned", [])]
+    
+    if username.lower() not in banned_list:
+        data.setdefault("banned", []).append(username)
+        data["updated"] = datetime.now().isoformat() + "Z"
+        _save_banned_users(data)
+    
+    return redirect(url_for('admin.dashboard', message=f"🚫 Banned: {username}"))
+
+@admin_bp.route('/unban/<username>', methods=['POST'])
+@login_required
+def unban_user(username):
+    """Unban a GitHub user."""
+    data = _load_banned_users()
+    data["banned"] = [u for u in data.get("banned", []) if u.lower() != username.lower()]
+    data["updated"] = datetime.now().isoformat() + "Z"
+    _save_banned_users(data)
+    
+    return redirect(url_for('admin.dashboard', message=f"✅ Unbanned: {username}"))
+
+@admin_bp.route('/api/ban/<username>', methods=['POST'])
+@login_required
+def api_ban_user(username):
+    """API endpoint to ban a user (for programmatic access)."""
+    data = _load_banned_users()
+    banned_list = [u.lower() for u in data.get("banned", [])]
+    
+    if username.lower() in banned_list:
+        return jsonify({"success": True, "message": f"{username} already banned", "banned": data["banned"]})
+    
+    data.setdefault("banned", []).append(username)
+    data["updated"] = datetime.now().isoformat() + "Z"
+    _save_banned_users(data)
+    
+    return jsonify({"success": True, "message": f"Banned {username}", "banned": data["banned"]})
+
 
