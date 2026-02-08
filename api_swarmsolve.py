@@ -579,7 +579,7 @@ Only PASS if the code is clearly benign."""
 
         if grok_resp.status_code != 200:
             print(f"[SWARMSOLVE] Grok API error: {grok_resp.status_code}", flush=True)
-            return False, f"Safety scan unavailable: Grok API error (HTTP {grok_resp.status_code}). API key may be expired. Try again or admin override.", False
+            return False, f"Safety scan unavailable: AI audit service error (HTTP {grok_resp.status_code}). Service may be temporarily unavailable. Try again or admin override.", False
 
         report = grok_resp.json()["choices"][0]["message"]["content"]
         print(f"[SWARMSOLVE] Safety scan result:\n{report}", flush=True)
@@ -1011,7 +1011,7 @@ def approve_solution(solution_id):
                     "Solution ID": solution_id,
                     "Target Repo": target_repo,
                     "PR": f"#{pr_number}",
-                    "Type": "Security flag" if scan_ran else "Scan unavailable (Grok down?)"
+                    "Type": "Security flag" if scan_ran else "Scan unavailable (AI audit service down?)"
                 }
             )
             return jsonify({
