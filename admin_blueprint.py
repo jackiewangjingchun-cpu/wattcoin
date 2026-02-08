@@ -604,14 +604,6 @@ DASHBOARD_TEMPLATE = """
             <div id="queue-items" class="space-y-2"></div>
         </div>
         
-        <!-- Open Bounties -->
-        <div class="mb-8">
-            <h2 class="text-lg font-semibold mb-3">📋 Open Bounties</h2>
-            <div id="bounties-section">
-                <div class="text-gray-500 text-sm">Loading bounties...</div>
-            </div>
-        </div>
-        
         <!-- PR List -->
         <h2 class="text-xl font-semibold mb-4">Open Pull Requests</h2>
         
@@ -873,7 +865,6 @@ DASHBOARD_TEMPLATE = """
         checkWebhooks();
         loadSwarmSolve();
         loadQueueDetail();
-        loadBounties();
         setInterval(checkHealth, 30000);
         setInterval(checkWebhooks, 30000);
         setInterval(loadQueueDetail, 30000);
@@ -910,43 +901,6 @@ DASHBOARD_TEMPLATE = """
                 items.innerHTML = html;
             } catch (err) {
                 section.style.display = 'none';
-            }
-        }
-        
-        async function loadBounties() {
-            const section = document.getElementById('bounties-section');
-            try {
-                const resp = await fetch('{{ url_for("admin.api_bounties") }}');
-                const data = await resp.json();
-                const bounties = data.bounties || [];
-                
-                if (bounties.length === 0) {
-                    section.innerHTML = '<div class="bg-gray-800 rounded-lg p-4 text-center text-gray-500 text-sm">No open bounties</div>';
-                    return;
-                }
-                
-                let html = '<div class="space-y-2">';
-                for (const b of bounties) {
-                    const labels = (b.labels || []).filter(l => l !== 'bounty');
-                    html += '<div class="bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 flex justify-between items-center">';
-                    html += '<div>';
-                    html += '<a href="' + b.url + '" target="_blank" class="text-blue-400 hover:underline font-medium">';
-                    html += '#' + b.number + ' ' + (b.title || 'Untitled') + '</a>';
-                    if (b.amount) html += ' • <span class="text-green-400 font-bold">' + b.amount.toLocaleString() + ' WATT</span>';
-                    for (const l of labels) {
-                        html += ' <span class="px-1.5 py-0.5 bg-gray-700 text-gray-400 rounded text-xs">' + l + '</span>';
-                    }
-                    html += '</div>';
-                    html += '<div class="text-gray-500 text-xs">';
-                    if (b.claimed_by) html += '🎯 ' + b.claimed_by;
-                    else html += '⏳ Unclaimed';
-                    html += '</div>';
-                    html += '</div>';
-                }
-                html += '</div>';
-                section.innerHTML = html;
-            } catch (err) {
-                section.innerHTML = '<div class="bg-gray-800 rounded-lg p-4 text-red-400 text-sm">Failed to load bounties: ' + err.message + '</div>';
             }
         }
         
@@ -2963,57 +2917,6 @@ def api_queue():
     return jsonify({"pending": pending, "count": len(pending)})
 
 
-@admin_bp.route('/api/bounties')
-@login_required
-def api_bounties():
-    """Return open bounty issues from GitHub for dashboard display."""
-    import requests as req
-    
-    try:
-        resp = req.get(
-            f"https://api.github.com/repos/{REPO}/issues",
-            headers=github_headers(),
-            params={"labels": "bounty", "state": "open", "per_page": 20},
-            timeout=10
-        )
-        
-        if resp.status_code != 200:
-            return jsonify({"bounties": [], "error": f"GitHub API: {resp.status_code}"})
-        
-        issues = resp.json()
-        bounties = []
-        
-        for issue in issues:
-            title = issue.get("title", "")
-            body = issue.get("body", "") or ""
-            labels = [l.get("name", "") for l in issue.get("labels", [])]
-            
-            # Extract WATT amount
-            import re
-            watt_match = re.search(r'([\d,]+)\s*WATT', body + " " + title, re.IGNORECASE)
-            amount = int(watt_match.group(1).replace(",", "")) if watt_match and watt_match.group(1).replace(",", "").isdigit() else None
-            
-            # Check for claims in assignees
-            assignees = [a.get("login") for a in issue.get("assignees", [])]
-            claimed_by = assignees[0] if assignees else None
-            
-            bounties.append({
-                "number": issue.get("number"),
-                "title": title,
-                "url": issue.get("html_url"),
-                "labels": labels,
-                "amount": amount,
-                "claimed_by": claimed_by,
-                "created_at": issue.get("created_at", "")[:10]
-            })
-        
-        return jsonify({"bounties": bounties, "count": len(bounties)})
-    
-    except Exception as e:
-        print(f"[ADMIN] Bounties API error: {e}", flush=True)
-        return jsonify({"bounties": [], "error": str(e)})
-
-
 # =============================================================================
 # BAN MANAGEMENT
 # =============================================================================
@@ -3074,5 +2977,6 @@ def api_ban_user(username):
     _save_banned_users(data)
     
     return jsonify({"success": True, "message": f"Banned {username}", "banned": data["banned"]})
+
 
 
