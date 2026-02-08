@@ -52,6 +52,11 @@ REPO = "WattCoin-Org/wattcoin"
 PR_REVIEWS_FILE = f"{DATA_DIR}/pr_reviews.json"
 PR_PAYOUTS_FILE = f"{DATA_DIR}/pr_payouts.json"
 REPUTATION_FILE = f"{DATA_DIR}/contributor_reputation.json"
+PR_RATE_LIMITS_FILE = f"{DATA_DIR}/pr_rate_limits.json"
+
+# AI Review Rate Limits
+MAX_REVIEWS_PER_PR = 5
+REVIEW_COOLDOWN_SECONDS = 900  # 15 minutes
 
 # =============================================================================
 # DISCORD NOTIFICATIONS
@@ -753,6 +758,86 @@ def queue_payment(pr_number, wallet, amount, bounty_issue_id=None, review_score=
     
     return True
 
+# =============================================================================
+# AI REVIEW RATE LIMITING
+# =============================================================================
+
+def load_pr_rate_limits():
+    """Load PR review rate limit tracking data."""
+    try:
+        with open(PR_RATE_LIMITS_FILE, 'r') as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+def save_pr_rate_limits(data):
+    """Save PR review rate limit tracking data."""
+    os.makedirs(os.path.dirname(PR_RATE_LIMITS_FILE), exist_ok=True)
+    with open(PR_RATE_LIMITS_FILE, 'w') as f:
+        json.dump(data, f, indent=2)
+
+def check_review_rate_limit(pr_number):
+    """
+    Check if a PR has exceeded AI review limits.
+    Returns (allowed, reason) tuple.
+    """
+    limits = load_pr_rate_limits()
+    pr_key = str(pr_number)
+    
+    if pr_key not in limits:
+        return True, None
+    
+    pr_data = limits[pr_key]
+    review_count = pr_data.get("count", 0)
+    last_review = pr_data.get("last_review")
+    
+    # Check max reviews per PR
+    if review_count >= MAX_REVIEWS_PER_PR:
+        return False, (
+            f"## ⛔ Review Limit Reached\n\n"
+            f"This PR has used all **{MAX_REVIEWS_PER_PR}** AI reviews.\n\n"
+            f"To get a fresh review, please **close this PR and open a new one** "
+            f"with your fixes applied.\n\n"
+            f"— WattCoin Automated Review"
+        )
+    
+    # Check cooldown
+    if last_review:
+        from datetime import datetime, timezone
+        try:
+            last_time = datetime.fromisoformat(last_review.replace("Z", "+00:00"))
+            now = datetime.now(timezone.utc)
+            elapsed = (now - last_time).total_seconds()
+            if elapsed < REVIEW_COOLDOWN_SECONDS:
+                remaining = int(REVIEW_COOLDOWN_SECONDS - elapsed)
+                mins = remaining // 60
+                secs = remaining % 60
+                return False, (
+                    f"## ⏳ Review Cooldown\n\n"
+                    f"Please wait **{mins}m {secs}s** before the next AI review.\n\n"
+                    f"Reviews remaining for this PR: **{MAX_REVIEWS_PER_PR - review_count}**/{MAX_REVIEWS_PER_PR}\n\n"
+                    f"— WattCoin Automated Review"
+                )
+        except (ValueError, TypeError):
+            pass
+    
+    return True, None
+
+def record_review(pr_number):
+    """Record that an AI review was performed for a PR."""
+    from datetime import datetime, timezone
+    limits = load_pr_rate_limits()
+    pr_key = str(pr_number)
+    
+    if pr_key not in limits:
+        limits[pr_key] = {"count": 0, "last_review": None}
+    
+    limits[pr_key]["count"] = limits[pr_key].get("count", 0) + 1
+    limits[pr_key]["last_review"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    
+    save_pr_rate_limits(limits)
+
+
 def load_banned_users():
     """Load banned users list from data file + hardcoded permanent bans."""
     # Hardcoded permanent bans (cannot be bypassed by data file deletion)
@@ -892,11 +977,21 @@ def handle_pr_review_trigger(pr_number, action):
         print(f"[DUPLICATE-GUARD] PR #{pr_number} rejected — duplicate claim on Issue #{issue_number}", flush=True)
         return jsonify({"message": "Duplicate bounty claim rejected", "issue": issue_number}), 200
     
+    # === AI REVIEW RATE LIMIT GATE ===
+    allowed, rate_limit_msg = check_review_rate_limit(pr_number)
+    if not allowed:
+        post_github_comment(pr_number, rate_limit_msg)
+        print(f"[RATE-LIMIT] PR #{pr_number} — AI review blocked by rate limit", flush=True)
+        return jsonify({"message": "Rate limited", "pr": pr_number}), 200
+    
     # Post initial comment
     post_github_comment(pr_number, "🤖 **AI review triggered...** Analyzing code changes...")
     
     # Trigger AI review
     review_result, review_error = trigger_ai_review(pr_number)
+    
+    # Record this review against rate limit
+    record_review(pr_number)
     
     if review_error:
         post_github_comment(pr_number, f"❌ **Review failed:** {review_error}")
