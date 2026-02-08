@@ -63,8 +63,9 @@ ESCROW_WALLET = os.getenv("ESCROW_WALLET_ADDRESS", "")
 ESCROW_WALLET_PRIVATE_KEY = os.getenv("ESCROW_WALLET_PRIVATE_KEY", "")
 TREASURY_WALLET = os.getenv("TREASURY_WALLET_ADDRESS", "")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
-GROK_API_KEY = os.getenv("GROK_API_KEY", "")
-GROK_API_URL = "https://api.x.ai/v1/chat/completions"
+AI_API_KEY = os.getenv("AI_REVIEW_API_KEY", "")
+AI_API_URL = os.getenv("AI_REVIEW_API_URL", "")
+AI_MODEL = os.getenv("AI_REVIEW_MODEL", "")
 WATT_DECIMALS = 6
 
 
@@ -500,14 +501,14 @@ def verify_pr_merged(pr_number, issue_number, target_repo=None):
 
 def safety_scan_pr(pr_number, target_repo):
     """
-    Fetch PR diff from target repo and run AI safety scan via Grok.
+    Fetch PR diff from target repo and run AI safety scan.
     Returns: (passed: bool, report: str, scan_ran: bool)
     - passed=True, scan_ran=True: code is safe, proceed
     - passed=False, scan_ran=True: flagged, block payment
     - passed=False, scan_ran=False: scan couldn't run, block payment (admin override needed)
     """
-    if not GROK_API_KEY:
-        print("[SWARMSOLVE] GROK_API_KEY not set — BLOCKING (scan required)", flush=True)
+    if not AI_API_KEY:
+        print("[SWARMSOLVE] AI_API_KEY not set — BLOCKING (scan required)", flush=True)
         return False, "Safety scan unavailable: AI audit service not configured. Admin override required.", False
 
     check_repo = target_repo or REPO
@@ -562,26 +563,13 @@ Be strict — if in doubt, FAIL. False positives are better than letting malicio
 Only PASS if the code is clearly benign."""
 
     try:
-        grok_resp = requests.post(
-            GROK_API_URL,
-            headers={
-                "Authorization": f"Bearer {GROK_API_KEY}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": "grok-beta",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.1,
-                "max_tokens": 500
-            },
-            timeout=30
-        )
+        from ai_provider import call_ai
+        report, ai_error = call_ai(prompt, temperature=0.1, max_tokens=500, timeout=30)
 
-        if grok_resp.status_code != 200:
-            print(f"[SWARMSOLVE] Grok API error: {grok_resp.status_code}", flush=True)
-            return False, f"Safety scan unavailable: AI audit service error (HTTP {grok_resp.status_code}). Service may be temporarily unavailable. Try again or admin override.", False
+        if ai_error:
+            print(f"[SWARMSOLVE] AI API error: {ai_error}", flush=True)
+            return False, f"Safety scan unavailable: AI audit service error ({ai_error}). Service may be temporarily unavailable. Try again or admin override.", False
 
-        report = grok_resp.json()["choices"][0]["message"]["content"]
         print(f"[SWARMSOLVE] Safety scan result:\n{report}", flush=True)
 
         # Parse verdict
@@ -985,7 +973,7 @@ def approve_solution(solution_id):
         # Safety scan — fetch diff and run through AI audit
         target_repo = solution.get("target_repo", REPO)
 
-        # Admin can skip scan if Grok is down
+        # Admin can skip scan if AI service is down
         admin_key = (data.get("admin_key") or "").strip()
         skip_scan = data.get("skip_scan", False)
         expected_admin = os.getenv("ADMIN_API_KEY", "")
