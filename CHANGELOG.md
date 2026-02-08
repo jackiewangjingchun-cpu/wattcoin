@@ -1,3 +1,46 @@
+## [February 8, 2026 - v3.10.1] - Discord Notification Cleanup
+
+### Discord Notification Cleanup
+- Suppressed 6 noisy Discord notifications (AI review failed, wallet extraction failed, webhook crash, payment unconfirmed/failed/exception)
+- Kept 8 key notifications (tier promotion, banned user, duplicate bounty, AI review complete, bounty created, PR submitted, PR merged, payment sent)
+- All suppressed events still tracked via server logs, GitHub comments, data files, and admin dashboard
+
+## [February 8, 2026 - WSI v2.0.0] - Distributed Inference
+
+### WSI Phase 1 — Distributed Inference (NEW)
+- **API Gateway Rewrite** — `api_wsi.py` v2.0.0 replaces AI chatbot with distributed swarm routing
+- `POST /api/v1/wsi/query` — submit inference queries (5K WATT hold required), forwards to seed node gateway
+- `POST /api/v1/wsi/contribute` — nodes report inference contributions for WATT payouts
+- `GET /api/v1/wsi/swarm` — live swarm health (nodes, blocks, models, capacity)
+- `GET /api/v1/wsi/models` — available models across the network
+- 70/30 payout split (node operator / treasury) per query served
+- Query cost deduction, daily limits, usage tracking preserved from v1
+
+### Distributed Node Service (NEW)
+- `wattnode/services/petals_node.py` — GPU detection, dependency installer, server start/stop
+- System check: GPU VRAM, RAM, disk space, Python version
+- Install wizard with progress callbacks for GUI integration
+- Server process management with log streaming and status tracking
+
+### Seed Node HTTP Gateway (NEW)
+- `wattnode/services/petals_gateway.py` — runs on seed node alongside inference server
+- Wraps distributed inference client as HTTP API (Railway forwards queries here)
+- `/inference`, `/swarm`, `/models`, `/health` endpoints
+- Shared-secret auth via environment variable
+
+### Inference Service Upgrade (NEW)
+- `wattnode/services/inference.py` v2.0.0 — dual-backend support (local + distributed)
+- Auto mode: tries distributed gateway first, falls back to local
+- Legacy `local_inference()` preserved for backward compatibility
+
+### WattNode GUI v3.0 — Inference Tab (NEW)
+- 🧠 Inference tab with GPU detection, dependency install wizard, serve toggle
+- Step-by-step setup with progress bars and clear user communication
+- Live inference logs, status indicators, start/stop controls
+
+### Config
+- `wattnode/config.example.yaml` updated with distributed inference section (model, num_blocks, port, device)
+
 ## [February 8, 2026 - v3.10.0] - AI Review Rate Limiting
 
 ### AI Review Rate Limiting (NEW)
@@ -14,10 +57,6 @@
 - **Closed PR #130** — EugeneJarvis88, health endpoint bounty #90 (4-6/10)
 - **Closed PR #125** — mccoychang, rate limiting bounty #88 (9→4/10 after 15 review cycles)
 
-### Contributors
-- Project Owner — Requirements
-- Claude — Implementation
-
 ## [February 8, 2026 - v3.9.0] - Node Reliability Scoring
 
 ### WattNode Reliability System (NEW)
@@ -31,10 +70,6 @@
 - Node registration defaults to Bronze tier with 20.0 initial score
 - Health check version bumped to 3.1.0
 
-### Contributors
-- Project Owner — Requirements
-- Claude — Implementation
-
 ## [February 8, 2026 - v3.8.0] - Admin Dashboard Enhancements
 
 ### Admin Dashboard v3.8.0 (NEW)
@@ -44,10 +79,6 @@
 - Added `GET /admin/api/queue` endpoint — returns pending payment queue as JSON
 - Added `GET /admin/api/bounties` endpoint — returns open bounty issues from GitHub API
 - Dashboard version bumped to v3.8.0
-
-### Contributors
-- Project Owner — Requirements
-- Claude — Implementation
 
 ## [February 8, 2026 - v3.7.0] - Discord Activity Feed
 
@@ -61,10 +92,6 @@
 - Added `truncate_wallet()` helper for public-safe wallet display
 - Added `issues` event handler to webhook (previously only `pull_request`)
 - All events follow sanitization rules: no specs, no tokens, no admin actions, no stack traces
-
-### Contributors
-- Project Owner — Spec, requirements
-- Claude — Implementation
 
 ## [February 8, 2026 - v3.6.0] - SwarmSolve Agent Claim System
 
@@ -80,10 +107,6 @@
 - Idempotent — re-claiming returns spec without duplicate entry
 - claim_count + max_claims added to list and detail endpoints
 - API docs updated to v1.2 with claim endpoint documentation
-
-### Contributors
-- Project Owner — Strategy, requirements
-- Claude — Implementation
 
 ## [February 8, 2026 - v3.5.0] - Clawbot Prompt Template, SwarmSolve Phase 2, Dashboard v3.4.0
 
@@ -133,11 +156,6 @@
 - Clickable feature boxes (11 of 13 cards linked)
 - "On-Chain Escrow" moved from Coming Soon to live (SwarmSolve)
 
-### Contributors
-- Project Owner — Testing, debugging, strategy
-- Claude — Implementation
-- Grok — Code review, WSI technical analysis
-
 ## [February 8, 2026 - v3.3.0] - SwarmSolve Phase 1, Dev Supply Lock, Bounty Quality
 
 ### SwarmSolve Phase 1 — Escrow Bounty Marketplace (NEW)
@@ -184,12 +202,6 @@
 - 24h volume: $35,613
 - Holders growing organically (10 → 25)
 
-### Contributors
-- Project Owner — Testing, coordination, transparency initiative
-- Claude — Implementation
-
----
-
 ## [February 7, 2026 - v3.2.2] - Agent Delegation v2.0, Spam Guards, Community Launch
 
 ### Agent-to-Agent Delegation v2.0 (NEW)
@@ -224,12 +236,6 @@
 - ~5x price action, peaked at 82% before pullback
 - ~$36K to Raydium graduation
 
-### Contributors
-- Project Owner — Testing, coordination, liquidity push
-- Claude — Implementation
-
----
-
 ## [February 7, 2026 - v3.2.1] - Discord Alerts, Activity Feed, Bounty Wave
 
 ### Discord Notifications
@@ -259,12 +265,6 @@
 - #91: AI verification retry logic (5,000 WATT)
 - #92: Task marketplace leaderboard (3,000 WATT)
 
-### Contributors
-- Project Owner — Testing, coordination, liquidity push
-- Claude — Implementation
-
----
-
 ## [February 7, 2026 - v3.2.0] - Agent Task Marketplace Launch
 
 ### Agent Task Marketplace (NEW — `api_tasks.py`)
@@ -283,12 +283,6 @@
 - Self-claim prevention (can't claim your own task)
 - Deadline enforcement with auto-expiration
 - First task seeded: "Scrape top 50 Solana DePIN projects" (5,000 WATT, task_6663537a089d)
-
-### Contributors
-- Project Owner — Testing, coordination, escrow funding
-- Claude — Implementation
-
----
 
 ## [February 6, 2026 - v3.1.0] - WattBot, Site Polish, Autonomous Bounties
 
@@ -328,13 +322,6 @@
 ### Documentation
 - **README.md**: All Grok references replaced with "AI"
 - **README.md**: Discord badge + link added, GitHub link added to links table
-
-### Contributors
-- Project Owner — Testing, debugging, coordination
-- Claude — Implementation
-- Clawbot — Autonomous PR contributions (PRs #86, #87)
-
----
 
 ## [February 6, 2026 - v3.0.0] - Merit System V1 — Contributor Reputation Gating
 
@@ -898,7 +885,6 @@
 - **Summary**: Updated to v6.4 - Added Dispute Resolution (multi-AI fallback verification) and Efficiency-Based Rebates (AI telemetry rewards) to Agent Economy Infrastructure section. Roadmap updated to reflect Q2-Q3 2026 delivery of these features.
 - **Requested by**: Grok v6.4 approval - strengthens agent economy narrative with dispute handling and efficiency incentives
 
-
 ## [January 30, 2026] - [19:45 UTC]
 - **Action**: Updated
 - **File**: deployment/pump_fun_metadata.json
@@ -910,7 +896,6 @@
 - **File**: deployment/simulate_deploy.sh
 - **Summary**: Fixed outdated values - burn rate 0.1%→0.15%, date Jan 20→Feb 1 2026, LP $1,200→$2,000
 - **Requested by**: Grok pre-launch validation checklist
-
 
 ## [January 30, 2026] - [17:15 UTC]
 - **Action**: Updated
@@ -974,6 +959,4 @@
 
 ---
 *This changelog tracks all implementation changes to the WattCoin repository for audit purposes.*
-
-
 
