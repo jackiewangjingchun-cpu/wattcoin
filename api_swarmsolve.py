@@ -327,33 +327,48 @@ def _gh_headers():
 
 def create_solution_issue(solution):
     """
-    Create GitHub issue for solution bounty.
+    Create GitHub issue for solution bounty — PUBLIC LISTING ONLY.
+    No detailed spec posted. Agents go to target_repo for full details.
     Returns: (issue_number, issue_url) or (None, None) on failure.
     """
     issue_num_placeholder = "{TBD}"
+    target_repo = solution.get("target_repo", REPO)
+    is_external = target_repo != REPO
+    target_repo_url = f"https://github.com/{target_repo}"
+
     title = f"[SOLUTION: {solution['budget_watt']:,} WATT] {solution['title']}"
+
+    if is_external:
+        delivery_section = f"""## Delivery Repo
+
+**[{target_repo}]({target_repo_url})**
+
+Full specification and implementation details are in the target repo.
+Submit your PR to the target repo — NOT to this repo.
+"""
+    else:
+        delivery_section = """## Delivery
+
+Submit your PR to this repo referencing this issue.
+"""
+
     body = f"""## SwarmSolve Solution Request
 
 **Budget:** {solution['budget_watt']:,} WATT (escrowed)
 **Deadline:** {solution['deadline_days']} days ({solution['deadline_date']})
-**Customer:** `{mask_wallet(solution['customer_wallet'])}`
 **Solution ID:** `{solution['id']}`
 
 ---
 
-## Specification
-
-{solution['description']}
-
----
+{delivery_section}
 
 ## How to Claim
 
-1. Comment on this issue to claim
-2. Submit a PR referencing this issue (include `Closes #{issue_num_placeholder}` in PR body)
+1. Review the full spec in the {'[target repo](' + target_repo_url + ')' if is_external else 'issue details'}
+2. Submit a PR {'to `' + target_repo + '`' if is_external else ''} referencing this issue (include `#{issue_num_placeholder}` in PR body)
 3. Include your Solana wallet in PR body: `Wallet: <your-address>`
 4. AI review + customer approval required
-5. First merged PR wins — **{int(solution['budget_watt'] * (100 - FEE_PERCENT) / 100):,} WATT** (95%) released to winner
+5. First approved PR wins — **{int(solution['budget_watt'] * (100 - FEE_PERCENT) / 100):,} WATT** (95%) released to winner
 
 ## Auto-Reject
 - PRs not referencing this issue
@@ -362,6 +377,12 @@ def create_solution_issue(solution):
 
 ## Escrow Proof
 [View escrow TX on Solscan](https://solscan.io/tx/{solution['escrow_tx']})
+
+---
+
+> ⚠️ **Privacy Notice:** WattCoin does not guarantee confidentiality of any information
+> posted in public repositories. Do not include proprietary details in PR descriptions
+> or comments on this issue.
 
 ---
 *Powered by SwarmSolve v1.0 — [wattcoin.org](https://wattcoin.org)*
@@ -430,19 +451,23 @@ def close_github_issue(issue_number):
         print(f"[SWARMSOLVE] Close issue error: {e}", flush=True)
 
 
-def verify_pr_merged(pr_number, issue_number):
+def verify_pr_merged(pr_number, issue_number, target_repo=None):
     """
     Check if PR is merged and references the solution issue.
+    Checks PR on target_repo (customer's repo) or default WattCoin repo.
     Returns: (valid: bool, author: str or None, winner_wallet: str or None, error: str or None)
     """
+    check_repo = target_repo or REPO
     try:
         resp = requests.get(
-            f"https://api.github.com/repos/{REPO}/pulls/{pr_number}",
+            f"https://api.github.com/repos/{check_repo}/pulls/{pr_number}",
             headers=_gh_headers(),
             timeout=15
         )
+        if resp.status_code == 404:
+            return False, None, None, f"PR #{pr_number} not found on {check_repo}"
         if resp.status_code != 200:
-            return False, None, None, "PR not found"
+            return False, None, None, f"Cannot access {check_repo}: HTTP {resp.status_code}"
 
         pr = resp.json()
         if not pr.get("merged"):
@@ -526,10 +551,19 @@ def prepare_solution():
             "min_budget_watt": MIN_BUDGET_WATT,
             "max_deadline_days": MAX_DEADLINE_DAYS,
             "fee_percent": FEE_PERCENT,
+            "privacy_warning": (
+                "Any information included in your submission title and public description "
+                "will be visible on GitHub. WattCoin does not guarantee confidentiality of "
+                "solution specs. Do NOT include proprietary algorithms, credentials, or trade "
+                "secrets in your submission. Use your target repo's private issues or README "
+                "for sensitive implementation details."
+            ),
             "instructions": [
                 f"1. Send WATT to {ESCROW_WALLET} with memo: swarmsolve:{slug}",
-                "2. Call POST /api/v1/solutions/submit with TX signature and full spec",
-                "3. Save the approval_token from the response — needed to approve winner"
+                "2. Call POST /api/v1/solutions/submit with TX signature and spec",
+                "3. Include 'target_repo' (your GitHub repo where agents will PR solutions)",
+                "4. Include 'privacy_acknowledged': true to confirm you understand the privacy policy",
+                "5. Save the approval_token from the response — needed to approve winner or request refund"
             ]
         }), 200
 
@@ -546,10 +580,12 @@ def submit_solution():
     Body:
         title: str — must match what was passed to /prepare
         slug: str — slug returned from /prepare
-        description: str — markdown spec (min 20 chars)
+        description: str — detailed spec (kept private, NOT posted to public issue)
         budget_watt: int — amount sent (min 5,000)
         escrow_tx: str — Solana TX signature
         customer_wallet: str — sender's wallet
+        target_repo: str — GitHub repo for delivery (e.g. 'owner/repo'), optional
+        privacy_acknowledged: bool — must be true
         deadline_days: int (optional, default 14)
 
     Returns:
@@ -567,6 +603,8 @@ def submit_solution():
         budget_watt = data.get("budget_watt", 0)
         escrow_tx = (data.get("escrow_tx") or "").strip()
         customer_wallet = (data.get("customer_wallet") or "").strip()
+        target_repo = (data.get("target_repo") or "").strip()
+        privacy_acknowledged = data.get("privacy_acknowledged", False)
         deadline_days = data.get("deadline_days", DEFAULT_DEADLINE_DAYS)
 
         errors = []
@@ -584,9 +622,45 @@ def submit_solution():
             errors.append("customer_wallet: valid Solana address required")
         if deadline_days < 1 or deadline_days > MAX_DEADLINE_DAYS:
             errors.append(f"deadline_days: 1-{MAX_DEADLINE_DAYS}")
+        if not privacy_acknowledged:
+            errors.append("privacy_acknowledged: must be true — review privacy_warning from /prepare")
+
+        # Validate target_repo format if provided
+        if target_repo:
+            if "/" not in target_repo or len(target_repo.split("/")) != 2:
+                errors.append("target_repo: must be 'owner/repo' format (e.g. 'myorg/my-project')")
 
         if errors:
             return jsonify({"error": "Validation failed", "details": errors}), 400
+
+        # Verify target_repo is accessible (if provided)
+        if target_repo:
+            try:
+                repo_resp = requests.get(
+                    f"https://api.github.com/repos/{target_repo}/pulls?state=all&per_page=1",
+                    headers=_gh_headers(),
+                    timeout=15
+                )
+                if repo_resp.status_code == 404:
+                    return jsonify({
+                        "error": f"Target repo '{target_repo}' not found or not accessible",
+                        "hint": "Make the repo public, or invite 'WattCoin-Org' as a collaborator with read access"
+                    }), 400
+                elif repo_resp.status_code == 403:
+                    return jsonify({
+                        "error": f"No access to '{target_repo}'",
+                        "hint": "Invite 'WattCoin-Org' as a collaborator with read access, then resubmit"
+                    }), 400
+                elif repo_resp.status_code not in (200, 304):
+                    return jsonify({
+                        "error": f"Cannot verify target repo: HTTP {repo_resp.status_code}"
+                    }), 400
+                print(f"[SWARMSOLVE] Target repo '{target_repo}' verified accessible", flush=True)
+            except Exception as e:
+                return jsonify({"error": f"Failed to verify target repo: {e}"}), 400
+        else:
+            # Default to WattCoin repo for internal bounties
+            target_repo = REPO
 
         # Check TX not already used
         solutions_data = load_solutions()
@@ -618,6 +692,7 @@ def submit_solution():
             "budget_watt": budget_watt,
             "escrow_tx": escrow_tx,
             "customer_wallet": customer_wallet,
+            "target_repo": target_repo,
             "deadline_days": deadline_days,
             "deadline_date": deadline_date,
             "approval_token_hash": hashlib.sha256(approval_token.encode()).hexdigest(),
@@ -633,7 +708,7 @@ def submit_solution():
             "refunded_at": None
         }
 
-        # Create GitHub issue
+        # Create GitHub issue (public listing only — no spec details)
         issue_number, issue_url = create_solution_issue(solution)
         if issue_number:
             solution["github_issue"] = issue_number
@@ -651,12 +726,13 @@ def submit_solution():
             color=0x00BFFF,
             fields={
                 "Solution ID": solution_id,
+                "Target Repo": target_repo,
                 "Escrow TX": f"[Solscan](https://solscan.io/tx/{escrow_tx})",
                 "Issue": f"[#{issue_number}]({issue_url})" if issue_number else "N/A"
             }
         )
 
-        print(f"[SWARMSOLVE] Solution {solution_id} created: {title} ({budget_watt:,} WATT)", flush=True)
+        print(f"[SWARMSOLVE] Solution {solution_id} created: {title} ({budget_watt:,} WATT) -> {target_repo}", flush=True)
 
         return jsonify({
             "solution_id": solution_id,
@@ -665,9 +741,10 @@ def submit_solution():
             "github_issue": issue_number,
             "github_issue_url": issue_url,
             "escrow_wallet": ESCROW_WALLET,
+            "target_repo": target_repo,
             "budget_watt": budget_watt,
             "deadline_date": deadline_date,
-            "message": "Solution created! Save your approval_token — needed to approve the winner.",
+            "message": "Solution created! Save your approval_token — needed to approve the winner or request a refund.",
             "warning": "Do NOT share your approval_token publicly."
         }), 201
 
@@ -782,7 +859,9 @@ def approve_solution(solution_id):
         if not issue_number:
             return jsonify({"error": "No GitHub issue linked to this solution"}), 400
 
-        valid, author, winner_wallet, pr_error = verify_pr_merged(pr_number, issue_number)
+        valid, author, winner_wallet, pr_error = verify_pr_merged(
+            pr_number, issue_number, target_repo=solution.get("target_repo")
+        )
         if not valid:
             return jsonify({"error": f"PR verification failed: {pr_error}"}), 400
         if not winner_wallet:
@@ -878,18 +957,18 @@ def approve_solution(solution_id):
 @swarmsolve_bp.route('/api/v1/solutions/<solution_id>/refund', methods=['POST'])
 def refund_solution(solution_id):
     """
-    Admin-only: Refund escrow to customer (deadline expired, no winner).
-    v1: Manual trigger. Cron auto-refund in v2.
+    Customer requests refund of escrowed WATT.
 
-    Body: { "admin_key": "<ADMIN_API_KEY env var>" }
+    Refund rules (Option 3):
+    - Before any PR submitted to target repo: refund anytime
+    - After a PR exists: refund only after deadline expires
+    - Admin can always force refund via admin_key
+
+    Body: { "approval_token": "<token from /submit>" }
+    Alt:  { "admin_key": "<ADMIN_API_KEY>" }
     """
     try:
         data = request.get_json() or {}
-        admin_key = data.get("admin_key", "")
-
-        expected_key = os.getenv("ADMIN_API_KEY", "")
-        if not expected_key or admin_key != expected_key:
-            return jsonify({"error": "Unauthorized"}), 403
 
         solutions_data = load_solutions()
         solution = find_solution(solutions_data, solution_id)
@@ -898,6 +977,58 @@ def refund_solution(solution_id):
             return jsonify({"error": "Solution not found"}), 404
         if solution["status"] != "open":
             return jsonify({"error": f"Solution is '{solution['status']}', cannot refund"}), 400
+
+        # Auth: approval_token OR admin_key
+        approval_token = (data.get("approval_token") or "").strip()
+        admin_key = (data.get("admin_key") or "").strip()
+        expected_admin = os.getenv("ADMIN_API_KEY", "")
+
+        is_admin = bool(expected_admin and admin_key == expected_admin)
+        is_customer = False
+
+        if approval_token:
+            token_hash = hashlib.sha256(approval_token.encode()).hexdigest()
+            is_customer = token_hash == solution.get("approval_token_hash")
+
+        if not is_admin and not is_customer:
+            return jsonify({"error": "Unauthorized — provide approval_token or admin_key"}), 403
+
+        # Check refund eligibility (Option 3) — admin bypasses
+        if not is_admin:
+            target_repo = solution.get("target_repo", REPO)
+            issue_number = solution.get("github_issue")
+            deadline_str = solution.get("deadline_date", "")
+
+            # Check if any PR references this issue on target repo
+            has_active_pr = False
+            if issue_number:
+                try:
+                    pr_resp = requests.get(
+                        f"https://api.github.com/repos/{target_repo}/pulls?state=all&per_page=50",
+                        headers=_gh_headers(),
+                        timeout=15
+                    )
+                    if pr_resp.status_code == 200:
+                        for pr in pr_resp.json():
+                            body = pr.get("body", "") or ""
+                            if f"#{issue_number}" in body:
+                                has_active_pr = True
+                                break
+                except Exception as e:
+                    print(f"[SWARMSOLVE] PR check error during refund: {e}", flush=True)
+
+            if has_active_pr:
+                # Check if deadline has passed
+                if deadline_str:
+                    deadline_dt = datetime.strptime(deadline_str, "%Y-%m-%d")
+                    if datetime.utcnow() < deadline_dt:
+                        days_left = (deadline_dt - datetime.utcnow()).days
+                        return jsonify({
+                            "error": "Refund locked — active PR exists",
+                            "reason": f"A PR referencing this solution exists on {target_repo}. "
+                                      f"Refund available after deadline ({deadline_str}, {days_left} days remaining).",
+                            "deadline": deadline_str
+                        }), 400
 
         # Send refund directly from escrow wallet
         try:
