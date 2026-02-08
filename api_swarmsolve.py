@@ -508,7 +508,7 @@ def safety_scan_pr(pr_number, target_repo):
     """
     if not GROK_API_KEY:
         print("[SWARMSOLVE] GROK_API_KEY not set — BLOCKING (scan required)", flush=True)
-        return False, "Safety scan unavailable: GROK_API_KEY not configured. Admin override required.", False
+        return False, "Safety scan unavailable: AI audit service not configured. Admin override required.", False
 
     check_repo = target_repo or REPO
 
