@@ -1,11 +1,12 @@
 """
-SwarmSolve Phase 1 — Escrow Bounty Marketplace v1.0.0
+SwarmSolve Phase 1.5 — Escrow Bounty Marketplace v1.1.0
 
 Endpoints:
     POST /api/v1/solutions/prepare     — Get slug + escrow instructions (step 1)
     POST /api/v1/solutions/submit      — Verify escrow TX + create GitHub issue (step 2)
     GET  /api/v1/solutions             — List solutions (filter by status)
-    GET  /api/v1/solutions/<id>        — Get single solution
+    GET  /api/v1/solutions/<id>        — Get single solution (spec gated behind claim)
+    POST /api/v1/solutions/<id>/claim  — Agent claims solution (GitHub verified, returns spec)
     POST /api/v1/solutions/<id>/approve — Customer approves winner (token auth)
     POST /api/v1/solutions/<id>/refund  — Admin refund (manual v1)
 
@@ -14,9 +15,10 @@ Flow:
     2. Customer sends WATT to escrow wallet with memo "swarmsolve:<slug>"
     3. Customer calls /submit with TX sig + full spec
     4. Backend verifies TX on-chain, creates GitHub issue with solution-bounty label
-    5. Agents compete — first merged PR wins
-    6. Customer calls /approve with approval_token + pr_number
-    7. Backend releases 95% to winner from escrow, 5% to treasury
+    5. Agents claim via /claim (GitHub account must be 30+ days old, 1+ public repos)
+    6. Claimed agents get full spec, compete — first merged PR wins
+    7. Customer calls /approve with approval_token + pr_number
+    8. Backend releases 95% to winner from escrow, 5% to treasury
 """
 
 import os
@@ -58,6 +60,12 @@ DEFAULT_DEADLINE_DAYS = 14
 MAX_DEADLINE_DAYS = 30
 FEE_PERCENT = 5
 TX_MAX_AGE_SECONDS = 1800  # 30 min
+
+# Claim system
+MAX_CLAIMS_PER_SOLUTION = 5   # max agents claiming one solution
+MAX_ACTIVE_CLAIMS_PER_AGENT = 3  # max open claims per agent wallet
+MIN_GITHUB_ACCOUNT_AGE_DAYS = 30
+MIN_GITHUB_PUBLIC_REPOS = 1
 
 ESCROW_WALLET = os.getenv("ESCROW_WALLET_ADDRESS", "")
 ESCROW_WALLET_PRIVATE_KEY = os.getenv("ESCROW_WALLET_PRIVATE_KEY", "")
@@ -231,6 +239,86 @@ def mask_wallet(wallet):
 
 
 # =============================================================================
+# CLAIM SYSTEM — GitHub Account Verification
+# =============================================================================
+
+def verify_github_account(github_user):
+    """
+    Verify GitHub account meets trust requirements.
+    Returns: (passed: bool, reason: str or None, account_info: dict or None)
+    """
+    try:
+        resp = requests.get(
+            f"https://api.github.com/users/{github_user}",
+            headers=_gh_headers(),
+            timeout=10
+        )
+        if resp.status_code == 404:
+            return False, f"GitHub user '{github_user}' not found", None
+        if resp.status_code != 200:
+            return False, f"Cannot verify GitHub user: HTTP {resp.status_code}", None
+
+        user_data = resp.json()
+        created_str = user_data.get("created_at", "")
+        public_repos = user_data.get("public_repos", 0)
+        account_type = user_data.get("type", "User")
+
+        # Parse account age
+        from datetime import timezone
+        created_dt = datetime.strptime(created_str, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
+        age_days = (now - created_dt).days
+
+        info = {
+            "github_user": github_user,
+            "account_age_days": age_days,
+            "public_repos": public_repos,
+            "followers": user_data.get("followers", 0),
+            "type": account_type,
+            "created_at": created_str
+        }
+
+        # Check minimum account age
+        if age_days < MIN_GITHUB_ACCOUNT_AGE_DAYS:
+            return False, (
+                f"GitHub account too new ({age_days} days). "
+                f"Minimum {MIN_GITHUB_ACCOUNT_AGE_DAYS} days required. "
+                f"Try regular bounties first, then come back for SwarmSolve."
+            ), info
+
+        # Check minimum repos
+        if public_repos < MIN_GITHUB_PUBLIC_REPOS:
+            return False, (
+                f"GitHub account has {public_repos} public repos. "
+                f"Minimum {MIN_GITHUB_PUBLIC_REPOS} required."
+            ), info
+
+        return True, None, info
+
+    except Exception as e:
+        # Fail open for network errors — don't block claims due to GitHub API issues
+        print(f"[SWARMSOLVE] GitHub verification error for {github_user}: {e}", flush=True)
+        return True, None, {"github_user": github_user, "verification_error": str(e)}
+
+
+def count_active_claims_for_agent(solutions_data, wallet):
+    """Count how many open solutions this agent wallet has claimed."""
+    count = 0
+    for solution in solutions_data.get("solutions", []):
+        if solution.get("status") != "open":
+            continue
+        for claim in solution.get("claims", []):
+            if claim.get("wallet") == wallet:
+                count += 1
+    return count
+
+
+def is_wallet_claimed(solution, wallet):
+    """Check if wallet already claimed this solution."""
+    return any(c.get("wallet") == wallet for c in solution.get("claims", []))
+
+
+# =============================================================================
 # ON-CHAIN VERIFICATION
 # =============================================================================
 
@@ -367,11 +455,14 @@ Submit your PR to this repo referencing this issue.
 
 ## How to Claim
 
-1. Review the full spec in the {'[target repo](' + target_repo_url + ')' if is_external else 'issue details'}
-2. Submit a PR {'to `' + target_repo + '`' if is_external else ''} referencing this issue (include `#{issue_num_placeholder}` in PR body)
-3. Include your Solana wallet in PR body: `Wallet: <your-address>`
-4. AI review + customer approval required
-5. First approved PR wins — **{int(solution['budget_watt'] * (100 - FEE_PERCENT) / 100):,} WATT** (95%) released to winner
+1. Call `POST /api/v1/solutions/{solution['id']}/claim` with your wallet + GitHub username to get the full spec
+2. Review the spec and plan your implementation
+3. Submit a PR {'to `' + target_repo + '`' if is_external else ''} referencing this issue (include `#{issue_num_placeholder}` in PR body)
+4. Include your Solana wallet in PR body: `Wallet: <your-address>`
+5. AI review + customer approval required
+6. First approved PR wins — **{int(solution['budget_watt'] * (100 - FEE_PERCENT) / 100):,} WATT** (95%) released to winner
+
+**Requirements:** GitHub account must be 30+ days old with 1+ public repos.
 
 ## Auto-Reject
 - PRs not referencing this issue
@@ -804,6 +895,7 @@ def submit_solution():
             "winner_wallet": None,
             "winner_author": None,
             "payout_tx": None,
+            "claims": [],
             "created_at": datetime.utcnow().isoformat(),
             "approved_at": None,
             "refunded_at": None
@@ -963,7 +1055,9 @@ def list_solutions():
             "github_issue_url": s.get("github_issue_url"),
             "winner_pr": s.get("winner_pr"),
             "created_at": s.get("created_at"),
-            "customer_wallet": mask_wallet(s.get("customer_wallet"))
+            "customer_wallet": mask_wallet(s.get("customer_wallet")),
+            "claim_count": len(s.get("claims", [])),
+            "max_claims": MAX_CLAIMS_PER_SOLUTION
         } for s in solutions]
 
         return jsonify({"solutions": public, "count": len(public)}), 200
@@ -975,7 +1069,11 @@ def list_solutions():
 
 @swarmsolve_bp.route('/api/v1/solutions/<solution_id>', methods=['GET'])
 def get_solution(solution_id):
-    """Get single solution details (public view)."""
+    """
+    Get single solution details.
+    Description (full spec) only visible if requester provides a claimed wallet via ?wallet= param.
+    Without wallet or unclaimed wallet, description is replaced with a notice.
+    """
     try:
         solutions_data = load_solutions()
         solution = find_solution(solutions_data, solution_id)
@@ -983,10 +1081,32 @@ def get_solution(solution_id):
         if not solution:
             return jsonify({"error": "Solution not found"}), 404
 
+        # Check if requester has claimed this solution
+        requester_wallet = (request.args.get("wallet") or "").strip()
+        has_claimed = is_wallet_claimed(solution, requester_wallet) if requester_wallet else False
+
+        # Also allow customer to see their own spec
+        is_customer = False
+        approval_token = (request.args.get("approval_token") or "").strip()
+        if approval_token:
+            token_hash = hashlib.sha256(approval_token.encode()).hexdigest()
+            is_customer = token_hash == solution.get("approval_token_hash")
+
+        if has_claimed or is_customer:
+            description = solution["description"]
+        else:
+            description = (
+                "🔒 Full spec hidden. Claim this solution first via "
+                "POST /api/v1/solutions/{id}/claim to access the detailed specification."
+            )
+
+        claims = solution.get("claims", [])
+        claim_count = len(claims)
+
         return jsonify({
             "id": solution["id"],
             "title": solution["title"],
-            "description": solution["description"],
+            "description": description,
             "budget_watt": solution["budget_watt"],
             "status": solution["status"],
             "deadline_date": solution.get("deadline_date"),
@@ -998,11 +1118,145 @@ def get_solution(solution_id):
             "payout_tx": solution.get("payout_tx"),
             "created_at": solution.get("created_at"),
             "approved_at": solution.get("approved_at"),
-            "customer_wallet": mask_wallet(solution.get("customer_wallet"))
+            "customer_wallet": mask_wallet(solution.get("customer_wallet")),
+            "claim_count": claim_count,
+            "max_claims": MAX_CLAIMS_PER_SOLUTION,
+            "claimed": has_claimed
         }), 200
 
     except Exception as e:
         print(f"[SWARMSOLVE] Get error: {e}", flush=True)
+        return jsonify({"error": "Internal error"}), 500
+
+
+@swarmsolve_bp.route('/api/v1/solutions/<solution_id>/claim', methods=['POST'])
+def claim_solution(solution_id):
+    """
+    Agent claims a solution to get access to the full spec.
+    Requires GitHub account verification (min 30 days old, min 1 public repo).
+
+    Body:
+        wallet: str — agent's Solana wallet
+        github_user: str — agent's GitHub username
+    Returns:
+        Full description (spec) + claim confirmation
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "JSON body required"}), 400
+
+        wallet = (data.get("wallet") or "").strip()
+        github_user = (data.get("github_user") or "").strip()
+
+        if not wallet or len(wallet) < 32:
+            return jsonify({"error": "Valid Solana wallet address required"}), 400
+        if not github_user:
+            return jsonify({"error": "github_user required"}), 400
+
+        # Find solution
+        solutions_data = load_solutions()
+        solution = find_solution(solutions_data, solution_id)
+
+        if not solution:
+            return jsonify({"error": "Solution not found"}), 404
+        if solution["status"] != "open":
+            return jsonify({"error": f"Solution is '{solution['status']}', not open for claims"}), 400
+
+        # Check if already claimed by this wallet
+        if is_wallet_claimed(solution, wallet):
+            # Return spec again (idempotent)
+            return jsonify({
+                "message": "Already claimed — here is the full spec",
+                "solution_id": solution_id,
+                "description": solution["description"],
+                "target_repo": solution.get("target_repo"),
+                "deadline_date": solution.get("deadline_date"),
+                "budget_watt": solution["budget_watt"],
+                "already_claimed": True
+            }), 200
+
+        # Check max claims per solution
+        claims = solution.get("claims", [])
+        if len(claims) >= MAX_CLAIMS_PER_SOLUTION:
+            return jsonify({
+                "error": f"Maximum claims reached ({MAX_CLAIMS_PER_SOLUTION}). Solution is fully claimed.",
+                "claim_count": len(claims),
+                "max_claims": MAX_CLAIMS_PER_SOLUTION
+            }), 400
+
+        # Check max active claims per agent
+        active_claims = count_active_claims_for_agent(solutions_data, wallet)
+        if active_claims >= MAX_ACTIVE_CLAIMS_PER_AGENT:
+            return jsonify({
+                "error": f"You have {active_claims} active claims (max {MAX_ACTIVE_CLAIMS_PER_AGENT}). "
+                         f"Complete or wait for existing claims to close before claiming more.",
+                "active_claims": active_claims,
+                "max_active_claims": MAX_ACTIVE_CLAIMS_PER_AGENT
+            }), 400
+
+        # Check ban list
+        banned_users = load_json_data("/app/data/banned_users.json", default={"banned": []})
+        if github_user in banned_users.get("banned", []):
+            return jsonify({"error": "Account is restricted from SwarmSolve"}), 403
+
+        # Verify GitHub account trust
+        gh_passed, gh_reason, gh_info = verify_github_account(github_user)
+        if not gh_passed:
+            print(f"[SWARMSOLVE] Claim rejected for {github_user}: {gh_reason}", flush=True)
+            return jsonify({
+                "error": "GitHub account does not meet requirements",
+                "reason": gh_reason,
+                "requirements": {
+                    "min_account_age_days": MIN_GITHUB_ACCOUNT_AGE_DAYS,
+                    "min_public_repos": MIN_GITHUB_PUBLIC_REPOS
+                }
+            }), 403
+
+        # Record claim
+        claim = {
+            "wallet": wallet,
+            "github_user": github_user,
+            "claimed_at": datetime.utcnow().isoformat(),
+            "account_age_days": gh_info.get("account_age_days") if gh_info else None
+        }
+        solution.setdefault("claims", []).append(claim)
+        save_solutions(solutions_data)
+
+        print(f"[SWARMSOLVE] Claim recorded: {github_user} ({wallet[:8]}...) on {solution_id}", flush=True)
+
+        # GitHub comment
+        if solution.get("github_issue"):
+            post_issue_comment(solution["github_issue"],
+                f"🔒 **@{github_user}** claimed this solution ({len(solution['claims'])}/{MAX_CLAIMS_PER_SOLUTION} slots)"
+            )
+
+        # Discord notification
+        notify_discord(
+            "Solution Claimed",
+            f"**{solution['title']}**\n\n@{github_user} claimed solution `{solution_id}`",
+            color=0x00BFFF,
+            fields={
+                "Claims": f"{len(solution['claims'])}/{MAX_CLAIMS_PER_SOLUTION}",
+                "Agent": f"@{github_user}",
+                "Account Age": f"{gh_info.get('account_age_days', '?')} days" if gh_info else "N/A"
+            }
+        )
+
+        return jsonify({
+            "message": "Claimed! Full spec below. Good luck.",
+            "solution_id": solution_id,
+            "description": solution["description"],
+            "target_repo": solution.get("target_repo"),
+            "deadline_date": solution.get("deadline_date"),
+            "budget_watt": solution["budget_watt"],
+            "claim_count": len(solution["claims"]),
+            "max_claims": MAX_CLAIMS_PER_SOLUTION,
+            "github_requirements": "Submit PR to target repo referencing the issue. Include your wallet in PR body."
+        }), 200
+
+    except Exception as e:
+        print(f"[SWARMSOLVE] Claim error: {e}", flush=True)
         return jsonify({"error": "Internal error"}), 500
 
 
