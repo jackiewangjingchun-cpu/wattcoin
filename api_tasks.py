@@ -257,11 +257,12 @@ FEEDBACK: <brief explanation>"""
 # === Expiration Check ===
 
 def expire_stale_claims(data):
-    """Auto-expire claims that exceeded timeout."""
+    """Auto-expire claims that exceeded timeout AND tasks past deadline."""
     now = datetime.now(timezone.utc)
     expired_count = 0
     
     for task_id, task in data.get("tasks", {}).items():
+        # Expire stale claims (claimed → open after 48h)
         if task.get("status") == "claimed":
             claimed_at = task.get("claimed_at")
             if claimed_at:
@@ -273,10 +274,24 @@ def expire_stale_claims(data):
                     task["expiration_note"] = f"Claim expired after {CLAIM_TIMEOUT_HOURS}h"
                     expired_count += 1
                     logger.info("claim expired | task=%s", task_id)
+        
+        # Expire tasks past deadline (open/claimed/delegated → expired)
+        if task.get("status") in ("open", "claimed", "delegated"):
+            deadline = task.get("deadline")
+            if deadline:
+                try:
+                    deadline_time = datetime.fromisoformat(deadline)
+                    if now > deadline_time:
+                        task["status"] = "expired"
+                        task["expiration_note"] = f"Deadline passed: {deadline[:16]}"
+                        expired_count += 1
+                        logger.info("deadline expired | task=%s | deadline=%s", task_id, deadline[:16])
+                except (ValueError, TypeError):
+                    pass
     
     if expired_count > 0:
         save_tasks(data)
-        logger.info("expired %d stale claims", expired_count)
+        logger.info("expired %d stale claims/deadlines", expired_count)
     
     return expired_count
 
