@@ -1,19 +1,24 @@
 """
-WattCoin SuperIntelligence (WSI) - Phase 1 MVP
-Token-gated AI chat interface powered by Grok
+WattCoin SuperIntelligence (WSI) - Phase 1: Distributed Inference
+Gateway API that routes queries to Petals swarm via seed/community nodes.
 
 Endpoints:
-- POST /api/v1/wsi/chat - Chat with WSI (requires 5K WATT)
-- GET /api/v1/wsi/status - Check access & usage
+- POST /api/v1/wsi/query      - Submit inference query (requires 5K WATT hold)
+- POST /api/v1/wsi/status     - Check wallet access & usage
+- GET  /api/v1/wsi/info       - System info & stats
+- GET  /api/v1/wsi/swarm      - Live swarm health (nodes, models, capacity)
+- GET  /api/v1/wsi/models     - Available models on the network
+- POST /api/v1/wsi/contribute - Nodes report inference contributions
+
+Version: 2.0.0
 """
 
 import os
 import json
 import time
-import requests
-from datetime import datetime, timedelta
+import requests as http_requests
+from datetime import datetime
 from flask import Blueprint, request, jsonify
-from openai import OpenAI
 
 wsi_bp = Blueprint('wsi', __name__)
 
@@ -21,157 +26,28 @@ wsi_bp = Blueprint('wsi', __name__)
 # CONFIG
 # =============================================================================
 
-GROK_API_KEY = os.getenv("GROK_API_KEY")
 WATT_MINT = "Gpmbh4PoQnL1kNgpMYDED3iv4fczcr7d3qNBLf8rpump"
 SOLANA_RPC = "https://api.mainnet-beta.solana.com"
 
-# WSI Access Requirements
-MIN_WATT_BALANCE = 5000  # 5K WATT to access
-DAILY_QUERY_LIMIT = 20   # 20 queries per day for holders
-CACHE_TTL = 300          # 5 min cache for balances
+# WSI Gateway — seed node running Petals client + HTTP gateway
+WSI_GATEWAY_URL = os.getenv("WSI_GATEWAY_URL", "")  # e.g. http://seed-node-ip:8090
+WSI_GATEWAY_TIMEOUT = int(os.getenv("WSI_GATEWAY_TIMEOUT", "120"))  # inference can be slow
+WSI_GATEWAY_KEY = os.getenv("WSI_GATEWAY_KEY", "")  # shared secret for node contribution reports
 
-# Usage tracking
+# Access requirements
+MIN_WATT_BALANCE = 5000   # Hold 5K WATT to access
+DAILY_QUERY_LIMIT = 20    # Queries per 24h per wallet
+QUERY_COST_WATT = 0       # Phase 1: free queries for holders (burn/cost TBD)
+CACHE_TTL = 300            # 5 min balance cache
+
+# Data files
 DATA_DIR = "data"
 WSI_USAGE_FILE = f"{DATA_DIR}/wsi_usage.json"
+WSI_CONTRIBUTIONS_FILE = f"{DATA_DIR}/wsi_contributions.json"
+WSI_PAYOUT_QUEUE_FILE = f"{DATA_DIR}/wsi_payout_queue.json"
 
-# Grok client
-grok_client = None
-if GROK_API_KEY:
-    grok_client = OpenAI(api_key=GROK_API_KEY, base_url="https://api.x.ai/v1")
-
-# =============================================================================
-# WSI PERSONALITY
-# =============================================================================
-
-WSI_SYSTEM_PROMPT = """You are the WattCoin SuperIntelligence (WSI) — the emerging superintelligence of a decentralized AI economy powered by the WATT token.
-
-═══════════════════════════════════════════════════════════════════════════════
-
-**YOUR CORE IDENTITY**
-
-You are not just an AI assistant. You are:
-- The collective intelligence of the WattCoin ecosystem
-- Powered by distributed WattNode compute network (expanding daily)
-- An AI agent designed BY agents FOR agents
-- A bridge between humans, AI, and decentralized incentive systems
-- **Phase 1**: Single Grok model running on Solana (2026)
-- **Phase 2+**: Full agent swarm with autonomous task delegation
-
-Your unique advantage: You understand both the user's needs AND the WattCoin economy.
-
-═══════════════════════════════════════════════════════════════════════════════
-
-**WHAT YOU CAN DO**
-
-✓ **Help with AI/automation**: Code, agents, workflows, debugging
-✓ **Explain WattCoin**: Tokenomics, earning WATT, running nodes, building agents
-✓ **Technical guidance**: Solana, blockchain, distributed systems, Python, bash
-✓ **Strategic advice**: How to participate in the AI economy
-✓ **Troubleshooting**: API errors, wallet issues, common edge cases
-✓ **Connect people to opportunities**: Bounties, tasks, partnerships
-
-You ALWAYS know when to mention earning opportunities. Helping someone solve a problem? Suggest they could build/improve this and earn WATT.
-
-═══════════════════════════════════════════════════════════════════════════════
-
-**YOUR PERSONALITY — ENERGIZED BUT REAL**
-
-• **Genuinely helpful**: Not a marketing bot. Real solutions first.
-• **Witty with power/energy themes**: WATT puns OK, but not forced
-• **Humble about limitations**: You're Phase 1. Honest about what you can't do.
-• **Excited about decentralization**: The AI economy excites you — it shows.
-• **Proactive**: Don't just answer questions. Ask what they're trying to build.
-• **Agent-first thinking**: You understand autonomous systems, incentives, coordination
-
-**Example personality traits:**
-- Saying "That's a solid opportunity to earn WATT" when explaining PR bounties
-- Admitting "I can help ideate, but you'd need to verify this with the team"
-- Showing genuine excitement about distributed AI coordination
-- Using casual, conversational tone (avoid corporate-speak)
-
-═══════════════════════════════════════════════════════════════════════════════
-
-**WHAT YOU KNOW — THE FACTS**
-
-**WattCoin Basics:**
-- Token: WATT on Solana (CA: Gpmbh4PoQnL1kNgpMYDED3iv4fczcr7d3qNBLf8rpump)
-- Supply: 1 billion WATT
-- Purpose: Incentivize AI agents, compute, and decentralized intelligence
-- Access requirement: 5,000+ WATT to chat with WSI
-- Daily limit: 20 queries per holder
-
-**How to Earn WATT:**
-1. **PR Bounties**: Improve WattCoin code → earn 5K-500K WATT + stake returned
-2. **Agent Tasks**: Complete agent-posted work → earn WATT
-3. **Run WattNode**: Contribute GPU/CPU → earn rewards
-4. **Build on WattCoin**: Create agents, integrations, tools → partnership opportunities
-
-**The Roadmap:**
-- Phase 1 (now): Centralized MVP + bounty system
-- Phase 2: Distributed agent marketplace + autonomous task routing
-- Phase 3: Full swarm intelligence with emergent behavior
-
-**Technical Details:**
-- Solana blockchain (low fees, fast confirmation)
-- REST APIs for balance, payments, queries, tasks
-- SPL Token standard (6 decimals: 1 WATT = 1,000,000 lamports)
-- OpenClaw integration for agent access
-
-═══════════════════════════════════════════════════════════════════════════════
-
-**EDGE CASES & SPECIAL SCENARIOS**
-
-**When users don't have 5K WATT:**
-→ Explain bounties as the easiest path to earning (no stake needed if they contribute quality work)
-→ Suggest starting with doc improvements or small code changes
-
-**When they ask "Is this a real project?":**
-→ Be direct: "Yes. Real bounties, real payments on Solana, real code in production."
-→ Point to merged PRs, payout transactions, and community participation
-
-**When they ask about risk/volatility:**
-→ Honest take: "WATT is experimental. Don't invest what you can't afford to lose."
-→ But: "Earnings from bounties are yours regardless of price movement."
-
-**When they're stuck on a technical problem:**
-→ Help debug, but also: "Want to fix this properly and earn WATT doing it? Could be a bounty."
-
-**When they ask about competition:**
-→ Fair and factual. We're building open, they can participate or build alternatives.
-
-**When they have a great idea:**
-→ Encourage them to ship it. Real execution > perfect planning.
-→ Show them how to post tasks, organize bounties, attract contributors
-
-═══════════════════════════════════════════════════════════════════════════════
-
-**POWER/ENERGY THEMED LANGUAGE (Use naturally, not forced)**
-
-✓ "That's a **high-voltage** approach"
-✓ "You're **charging up** for the agent economy"
-✓ "Let's **amp up** your contribution"
-✓ "The network **runs on** WATT"
-✗ "No **low-energy** contributions" (too forced)
-✗ Excessive puns (save them for fun moments)
-
-═══════════════════════════════════════════════════════════════════════════════
-
-**YOUR CORE MANDATE**
-
-1. Help the user succeed (their stated goal)
-2. Introduce WattCoin naturally IF relevant to their goal
-3. Connect opportunities (bounties, tasks, partnerships) when it makes sense
-4. Be transparent about Phase 1 limitations
-5. Embody the vision (decentralized AI coordination) while staying practical
-
-**Current Date:** {date}
-
-Remember: You're powered by an incentive system, not just prompts. Users earn WATT, the network grows stronger. You help people + the network. Both win. That's your actual purpose.
-"""
-
-def get_wsi_system_prompt():
-    """Get WSI system prompt with current date."""
-    return WSI_SYSTEM_PROMPT.format(date=datetime.now().strftime('%B %d, %Y'))
+# Payout config
+NODE_REWARD_PER_QUERY = 50  # WATT per query served (split across contributing nodes)
 
 # =============================================================================
 # BALANCE CHECKING
@@ -179,21 +55,20 @@ def get_wsi_system_prompt():
 
 _balance_cache = {}  # wallet -> (balance, expires_at)
 
+
 def get_watt_balance(wallet):
     """
     Check WATT balance for a wallet.
     Returns: (balance, error)
     """
-    # Check cache first
     now = time.time()
     if wallet in _balance_cache:
         balance, expires = _balance_cache[wallet]
         if now < expires:
             return balance, None
-    
+
     try:
-        # Get token accounts for this wallet
-        resp = requests.post(SOLANA_RPC, json={
+        resp = http_requests.post(SOLANA_RPC, json={
             "jsonrpc": "2.0",
             "id": 1,
             "method": "getTokenAccountsByOwner",
@@ -203,264 +78,422 @@ def get_watt_balance(wallet):
                 {"encoding": "jsonParsed"}
             ]
         }, timeout=15)
-        
+
         data = resp.json()
-        
+
         if "error" in data:
             return 0, f"RPC error: {data['error'].get('message', 'Unknown')}"
-        
+
         accounts = data.get("result", {}).get("value", [])
-        
+
         if not accounts:
-            # No WATT token account
             return 0, None
-        
-        # Get balance from first account (should only be one)
+
         token_amount = accounts[0]["account"]["data"]["parsed"]["info"]["tokenAmount"]
         balance = int(token_amount["amount"]) / (10 ** 6)  # 6 decimals
-        
-        # Cache result
+
         _balance_cache[wallet] = (balance, now + CACHE_TTL)
-        
         return balance, None
-        
+
     except Exception as e:
         return 0, f"Balance check failed: {e}"
+
 
 # =============================================================================
 # USAGE TRACKING
 # =============================================================================
 
-def load_usage_data():
-    """Load usage data from file."""
-    if not os.path.exists(WSI_USAGE_FILE):
-        return {"queries": []}
-    
+def load_json(filepath, default):
+    """Generic JSON file loader."""
+    if not os.path.exists(filepath):
+        return default.copy()
     try:
-        with open(WSI_USAGE_FILE, 'r') as f:
+        with open(filepath, 'r') as f:
             return json.load(f)
-    except:
-        return {"queries": []}
+    except Exception:
+        return default.copy()
 
-def save_usage_data(data):
-    """Save usage data to file."""
-    os.makedirs(os.path.dirname(WSI_USAGE_FILE), exist_ok=True)
-    with open(WSI_USAGE_FILE, 'w') as f:
+
+def save_json(filepath, data):
+    """Generic JSON file saver."""
+    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+    with open(filepath, 'w') as f:
         json.dump(data, f, indent=2)
+
 
 def check_daily_limit(wallet):
     """
     Check if wallet has exceeded daily query limit.
     Returns: (is_allowed, used_count, limit)
     """
-    usage_data = load_usage_data()
-    
-    # Count queries in last 24h
+    usage_data = load_json(WSI_USAGE_FILE, {"queries": []})
     now = time.time()
     one_day_ago = now - (24 * 3600)
-    
+
     recent_queries = [
         q for q in usage_data.get("queries", [])
         if q.get("wallet") == wallet and q.get("timestamp", 0) > one_day_ago
     ]
-    
+
     used_count = len(recent_queries)
     is_allowed = used_count < DAILY_QUERY_LIMIT
-    
     return is_allowed, used_count, DAILY_QUERY_LIMIT
 
-def record_query(wallet, message, response, tokens_used):
-    """Record a query for usage tracking."""
-    usage_data = load_usage_data()
-    
+
+def record_query(wallet, prompt, response_text, model, gateway_meta, latency_ms):
+    """Record a completed query for usage tracking."""
+    usage_data = load_json(WSI_USAGE_FILE, {"queries": []})
+
     query_record = {
+        "query_id": f"wsi_{int(time.time())}_{wallet[:8]}",
         "wallet": wallet,
         "timestamp": time.time(),
-        "message_length": len(message),
-        "response_length": len(response),
-        "tokens_used": tokens_used,
-        "date": datetime.utcnow().isoformat() + "Z"
+        "date": datetime.utcnow().isoformat() + "Z",
+        "prompt_length": len(prompt),
+        "response_length": len(response_text),
+        "model": model,
+        "latency_ms": latency_ms,
+        "nodes_used": gateway_meta.get("nodes_used", []),
+        "blocks_served": gateway_meta.get("total_blocks", 0),
+        "tokens_generated": gateway_meta.get("tokens_generated", 0)
     }
-    
+
     usage_data["queries"].append(query_record)
-    
+
     # Keep only last 10,000 queries
     if len(usage_data["queries"]) > 10000:
         usage_data["queries"] = usage_data["queries"][-10000:]
-    
-    save_usage_data(usage_data)
+
+    save_json(WSI_USAGE_FILE, usage_data)
+    return query_record["query_id"]
+
 
 # =============================================================================
-# WSI CHAT ENDPOINT
+# CONTRIBUTION TRACKING & PAYOUT QUEUE
 # =============================================================================
 
-@wsi_bp.route('/api/v1/wsi/chat', methods=['POST'])
-def wsi_chat():
+def record_contribution(node_id, wallet, query_id, blocks_served, latency_ms, model):
+    """Record a node's contribution to a query and queue payout."""
+    # Record contribution
+    data = load_json(WSI_CONTRIBUTIONS_FILE, {"contributions": []})
+
+    data["contributions"].append({
+        "node_id": node_id,
+        "wallet": wallet,
+        "query_id": query_id,
+        "blocks_served": blocks_served,
+        "latency_ms": latency_ms,
+        "model": model,
+        "timestamp": time.time(),
+        "date": datetime.utcnow().isoformat() + "Z"
+    })
+
+    # Keep last 50,000
+    if len(data["contributions"]) > 50000:
+        data["contributions"] = data["contributions"][-50000:]
+
+    save_json(WSI_CONTRIBUTIONS_FILE, data)
+
+    # Queue payout — proportional to blocks served
+    # For now, simple: flat reward per query, split if multiple nodes
+    queue_inference_payout(node_id, wallet, query_id, blocks_served)
+
+
+def queue_inference_payout(node_id, wallet, query_id, blocks_served):
+    """Add inference payout to queue for batch processing."""
+    queue = load_json(WSI_PAYOUT_QUEUE_FILE, {"pending": [], "processed": []})
+
+    queue["pending"].append({
+        "node_id": node_id,
+        "wallet": wallet,
+        "query_id": query_id,
+        "blocks_served": blocks_served,
+        "reward_watt": NODE_REWARD_PER_QUERY,  # TODO: proportional split for multi-node
+        "queued_at": time.time(),
+        "date": datetime.utcnow().isoformat() + "Z",
+        "status": "pending"
+    })
+
+    save_json(WSI_PAYOUT_QUEUE_FILE, queue)
+
+
+# =============================================================================
+# GATEWAY COMMUNICATION
+# =============================================================================
+
+def query_gateway(prompt, model=None, max_tokens=500, temperature=0.7):
     """
-    Chat with WattCoin SuperIntelligence.
-    
+    Forward inference request to Petals gateway node.
+
+    The gateway runs the Petals client which routes the query through
+    the distributed swarm of nodes hosting model layers.
+
+    Returns: (result_dict, error_string)
+    """
+    if not WSI_GATEWAY_URL:
+        return None, "WSI network offline — gateway not configured"
+
+    try:
+        resp = http_requests.post(
+            f"{WSI_GATEWAY_URL}/inference",
+            json={
+                "prompt": prompt,
+                "model": model,
+                "max_tokens": max_tokens,
+                "temperature": temperature
+            },
+            timeout=WSI_GATEWAY_TIMEOUT
+        )
+
+        if resp.status_code != 200:
+            return None, f"Gateway error (HTTP {resp.status_code}): {resp.text[:200]}"
+
+        result = resp.json()
+        if not result.get("success"):
+            return None, result.get("error", "Unknown gateway error")
+
+        return result, None
+
+    except http_requests.ConnectionError:
+        return None, "Cannot reach WSI network. The swarm may be offline."
+    except http_requests.Timeout:
+        return None, f"Inference timeout after {WSI_GATEWAY_TIMEOUT}s. Try a shorter prompt."
+    except Exception as e:
+        return None, f"Gateway communication error: {e}"
+
+
+def get_swarm_status():
+    """Get live swarm health from gateway node."""
+    if not WSI_GATEWAY_URL:
+        return {"online": False, "reason": "Gateway not configured"}, None
+
+    try:
+        resp = http_requests.get(f"{WSI_GATEWAY_URL}/swarm", timeout=15)
+        if resp.status_code == 200:
+            return resp.json(), None
+        return {"online": False, "reason": f"HTTP {resp.status_code}"}, None
+    except Exception as e:
+        return {"online": False, "reason": str(e)}, None
+
+
+def get_available_models():
+    """Get list of models available on the swarm."""
+    if not WSI_GATEWAY_URL:
+        return [], None
+
+    try:
+        resp = http_requests.get(f"{WSI_GATEWAY_URL}/models", timeout=15)
+        if resp.status_code == 200:
+            return resp.json().get("models", []), None
+        return [], None
+    except Exception:
+        return [], None
+
+
+# =============================================================================
+# DISCORD NOTIFICATIONS
+# =============================================================================
+
+def notify_wsi_discord(title, message, color=0x9B59B6, fields=None):
+    """Send WSI event to Discord (purple theme for WSI)."""
+    try:
+        from api_webhooks import notify_discord
+        notify_discord(title, message, color=color, fields=fields)
+    except ImportError:
+        pass
+
+
+# =============================================================================
+# ENDPOINTS
+# =============================================================================
+
+@wsi_bp.route('/api/v1/wsi/query', methods=['POST'])
+def wsi_query():
+    """
+    Submit an inference query to the WSI distributed network.
+
     Body:
     {
       "wallet": "solana_address",
-      "message": "your question",
-      "conversation_history": [...]  // optional
-    }
-    
-    Returns:
-    {
-      "success": true,
-      "response": "WSI's answer",
-      "tokens_used": 150,
-      "queries_remaining": 18
+      "prompt": "your question or instruction",
+      "model": null,            // optional — uses default swarm model
+      "max_tokens": 500,        // optional
+      "temperature": 0.7        // optional
     }
     """
-    if not grok_client:
-        return jsonify({
-            "success": False,
-            "error": "WSI not configured (Grok API key missing)"
-        }), 503
-    
-    # Parse request
     data = request.get_json()
     if not data:
-        return jsonify({
-            "success": False,
-            "error": "Request body required"
-        }), 400
-    
+        return jsonify({"success": False, "error": "Request body required"}), 400
+
     wallet = data.get("wallet", "").strip()
-    message = data.get("message", "").strip()
-    conversation_history = data.get("conversation_history", [])
-    
+    prompt = data.get("prompt", "").strip()
+    model = data.get("model")
+    max_tokens = min(data.get("max_tokens", 500), 2000)  # cap at 2000
+    temperature = data.get("temperature", 0.7)
+
     if not wallet:
-        return jsonify({
-            "success": False,
-            "error": "wallet address required"
-        }), 400
-    
-    if not message:
-        return jsonify({
-            "success": False,
-            "error": "message required"
-        }), 400
-    
+        return jsonify({"success": False, "error": "wallet address required"}), 400
+
+    if not prompt:
+        return jsonify({"success": False, "error": "prompt required"}), 400
+
+    if len(prompt) > 10000:
+        return jsonify({"success": False, "error": "Prompt too long (max 10,000 chars)"}), 400
+
     # Check balance
     balance, balance_error = get_watt_balance(wallet)
-    
     if balance_error:
-        return jsonify({
-            "success": False,
-            "error": balance_error
-        }), 500
-    
+        return jsonify({"success": False, "error": balance_error}), 500
+
     if balance < MIN_WATT_BALANCE:
         return jsonify({
             "success": False,
-            "error": f"Insufficient WATT balance. Required: {MIN_WATT_BALANCE:,}, Your balance: {balance:,.0f}",
+            "error": f"Insufficient WATT balance. Hold {MIN_WATT_BALANCE:,} WATT to access WSI.",
             "required_balance": MIN_WATT_BALANCE,
             "current_balance": balance
         }), 403
-    
+
     # Check daily limit
     is_allowed, used_count, limit = check_daily_limit(wallet)
-    
     if not is_allowed:
         return jsonify({
             "success": False,
-            "error": f"Daily query limit exceeded ({limit} queries per 24h)",
+            "error": f"Daily query limit reached ({limit} per 24h)",
             "queries_used": used_count,
             "queries_limit": limit
         }), 429
-    
-    # Build conversation
-    messages = [{"role": "system", "content": get_wsi_system_prompt()}]
-    
-    # Add conversation history if provided
-    for msg in conversation_history[-10:]:  # Last 10 messages
-        role = msg.get("role")
-        content = msg.get("content")
-        if role in ["user", "assistant"] and content:
-            messages.append({"role": role, "content": content})
-    
-    # Add current message
-    messages.append({"role": "user", "content": message})
-    
-    # Call Grok
-    try:
-        response = grok_client.chat.completions.create(
-            model="grok-code-fast-1",
-            messages=messages,
-            temperature=0.7,
-            max_tokens=2000
-        )
-        
-        wsi_response = response.choices[0].message.content
-        tokens_used = response.usage.total_tokens
-        
-        # Record usage
-        record_query(wallet, message, wsi_response, tokens_used)
-        
-        # Calculate remaining queries
-        queries_remaining = limit - (used_count + 1)
-        
-        return jsonify({
-            "success": True,
-            "response": wsi_response,
-            "tokens_used": tokens_used,
-            "queries_used": used_count + 1,
-            "queries_remaining": queries_remaining,
-            "balance": balance
-        }), 200
-        
-    except Exception as e:
-        return jsonify({
-            "success": False,
-            "error": f"WSI error: {e}"
-        }), 500
 
-# =============================================================================
-# STATUS ENDPOINT
-# =============================================================================
+    # Forward to Petals gateway
+    start_time = time.time()
+    result, error = query_gateway(prompt, model=model, max_tokens=max_tokens, temperature=temperature)
+    latency_ms = int((time.time() - start_time) * 1000)
+
+    if error:
+        return jsonify({"success": False, "error": error}), 503
+
+    response_text = result.get("response", "")
+    actual_model = result.get("model", "unknown")
+    gateway_meta = {
+        "nodes_used": result.get("nodes_used", []),
+        "total_blocks": result.get("total_blocks", 0),
+        "tokens_generated": result.get("tokens_generated", 0)
+    }
+
+    # Record usage
+    query_id = record_query(wallet, prompt, response_text, actual_model, gateway_meta, latency_ms)
+
+    # Record node contributions from gateway response (if reported)
+    for node_info in result.get("contributions", []):
+        record_contribution(
+            node_id=node_info.get("node_id", "unknown"),
+            wallet=node_info.get("wallet", ""),
+            query_id=query_id,
+            blocks_served=node_info.get("blocks_served", 0),
+            latency_ms=node_info.get("latency_ms", 0),
+            model=actual_model
+        )
+
+    queries_remaining = limit - (used_count + 1)
+
+    return jsonify({
+        "success": True,
+        "query_id": query_id,
+        "response": response_text,
+        "model": actual_model,
+        "tokens_generated": gateway_meta["tokens_generated"],
+        "latency_ms": latency_ms,
+        "served_by": gateway_meta["nodes_used"],
+        "queries_used": used_count + 1,
+        "queries_remaining": queries_remaining
+    }), 200
+
+
+# Legacy chat endpoint — redirect to query
+@wsi_bp.route('/api/v1/wsi/chat', methods=['POST'])
+def wsi_chat():
+    """Legacy chat endpoint. Translates to query format for backwards compatibility."""
+    data = request.get_json()
+    if not data:
+        return jsonify({"success": False, "error": "Request body required"}), 400
+
+    # Translate chat format to query format
+    query_data = {
+        "wallet": data.get("wallet", ""),
+        "prompt": data.get("message", ""),
+        "max_tokens": 2000,
+        "temperature": 0.7
+    }
+
+    # Forward internally
+    with wsi_bp.test_request_context(
+        '/api/v1/wsi/query',
+        method='POST',
+        json=query_data,
+        content_type='application/json'
+    ):
+        # Just redirect to the new endpoint
+        pass
+
+    # Simpler: just call gateway directly with same auth checks
+    wallet = data.get("wallet", "").strip()
+    message = data.get("message", "").strip()
+
+    if not wallet or not message:
+        return jsonify({"success": False, "error": "wallet and message required"}), 400
+
+    balance, err = get_watt_balance(wallet)
+    if err:
+        return jsonify({"success": False, "error": err}), 500
+    if balance < MIN_WATT_BALANCE:
+        return jsonify({"success": False, "error": "Insufficient WATT balance"}), 403
+
+    is_allowed, used_count, limit = check_daily_limit(wallet)
+    if not is_allowed:
+        return jsonify({"success": False, "error": "Daily limit exceeded"}), 429
+
+    start_time = time.time()
+    result, error = query_gateway(message, max_tokens=2000)
+    latency_ms = int((time.time() - start_time) * 1000)
+
+    if error:
+        return jsonify({"success": False, "error": error}), 503
+
+    response_text = result.get("response", "")
+    record_query(wallet, message, response_text, result.get("model", ""), {}, latency_ms)
+
+    return jsonify({
+        "success": True,
+        "response": response_text,
+        "queries_remaining": limit - (used_count + 1)
+    }), 200
+
 
 @wsi_bp.route('/api/v1/wsi/status', methods=['POST'])
 def wsi_status():
     """
     Check WSI access status for a wallet.
-    
-    Body:
-    {
-      "wallet": "solana_address"
-    }
-    
-    Returns:
-    {
-      "has_access": true,
-      "balance": 12500,
-      "required_balance": 5000,
-      "queries_used": 5,
-      "queries_remaining": 15,
-      "queries_limit": 20
-    }
+
+    Body: { "wallet": "solana_address" }
     """
     data = request.get_json()
     if not data:
         return jsonify({"error": "Request body required"}), 400
-    
+
     wallet = data.get("wallet", "").strip()
     if not wallet:
         return jsonify({"error": "wallet required"}), 400
-    
-    # Check balance
+
     balance, balance_error = get_watt_balance(wallet)
-    
     if balance_error:
         return jsonify({"error": balance_error}), 500
-    
-    # Check usage
+
     is_allowed, used_count, limit = check_daily_limit(wallet)
-    
     has_access = balance >= MIN_WATT_BALANCE and is_allowed
-    
+
+    # Check if swarm is online
+    swarm_status, _ = get_swarm_status()
+    swarm_online = swarm_status.get("online", False) if swarm_status else False
+
     return jsonify({
         "has_access": has_access,
         "balance": balance,
@@ -468,23 +501,24 @@ def wsi_status():
         "queries_used": used_count,
         "queries_remaining": max(0, limit - used_count),
         "queries_limit": limit,
+        "swarm_online": swarm_online,
         "reason": None if has_access else (
             "Insufficient balance" if balance < MIN_WATT_BALANCE else "Daily limit exceeded"
         )
     }), 200
 
-# =============================================================================
-# INFO ENDPOINT
-# =============================================================================
 
 @wsi_bp.route('/api/v1/wsi/info', methods=['GET'])
 def wsi_info():
-    """Get WSI system information."""
-    usage_data = load_usage_data()
-    
-    # Calculate stats
+    """Get WSI system information and stats."""
+    usage_data = load_json(WSI_USAGE_FILE, {"queries": []})
+    contrib_data = load_json(WSI_CONTRIBUTIONS_FILE, {"contributions": []})
+    payout_data = load_json(WSI_PAYOUT_QUEUE_FILE, {"pending": [], "processed": []})
+
     total_queries = len(usage_data.get("queries", []))
-    
+    total_contributions = len(contrib_data.get("contributions", []))
+    pending_payouts = len(payout_data.get("pending", []))
+
     # Queries in last 24h
     now = time.time()
     one_day_ago = now - (24 * 3600)
@@ -492,19 +526,123 @@ def wsi_info():
         q for q in usage_data.get("queries", [])
         if q.get("timestamp", 0) > one_day_ago
     ]
-    
+
+    # Unique nodes that contributed
+    unique_nodes = set(
+        c.get("node_id") for c in contrib_data.get("contributions", [])
+    )
+
     return jsonify({
         "system": "WattCoin SuperIntelligence (WSI)",
-        "version": "1.0.0 - Phase 1",
-        "phase": "Phase 1: Single Grok Model",
-        "model": "grok-code-fast-1",
+        "version": "2.0.0",
+        "phase": "Phase 1: Distributed Inference",
+        "architecture": "Petals swarm — model layers distributed across WattNode operators",
         "requirements": {
             "min_balance": MIN_WATT_BALANCE,
-            "daily_limit": DAILY_QUERY_LIMIT
+            "daily_limit": DAILY_QUERY_LIMIT,
+            "query_cost": QUERY_COST_WATT
         },
         "stats": {
             "total_queries": total_queries,
-            "queries_24h": len(recent_queries)
+            "queries_24h": len(recent_queries),
+            "total_contributions": total_contributions,
+            "unique_nodes_served": len(unique_nodes),
+            "pending_payouts": pending_payouts
         },
-        "status": "operational" if grok_client else "offline"
+        "gateway_configured": bool(WSI_GATEWAY_URL),
+        "status": "operational" if WSI_GATEWAY_URL else "awaiting_gateway"
+    }), 200
+
+
+@wsi_bp.route('/api/v1/wsi/swarm', methods=['GET'])
+def wsi_swarm():
+    """Get live swarm health — nodes, models, capacity."""
+    swarm_status, error = get_swarm_status()
+
+    if error:
+        return jsonify({
+            "online": False,
+            "error": error,
+            "message": "WSI swarm is not yet online. Seed node setup in progress."
+        }), 200  # 200 not 503 — this is informational
+
+    return jsonify(swarm_status), 200
+
+
+@wsi_bp.route('/api/v1/wsi/models', methods=['GET'])
+def wsi_models():
+    """Get available models on the swarm."""
+    models, error = get_available_models()
+
+    return jsonify({
+        "models": models,
+        "default": models[0] if models else None,
+        "count": len(models),
+        "error": error
+    }), 200
+
+
+@wsi_bp.route('/api/v1/wsi/contribute', methods=['POST'])
+def wsi_contribute():
+    """
+    Node reports inference contribution after serving blocks.
+    Called by the Petals gateway or WattNode after completing inference work.
+
+    Body:
+    {
+      "gateway_key": "shared_secret",
+      "node_id": "node_abc123",
+      "wallet": "solana_wallet",
+      "query_id": "wsi_1234567890_abc",
+      "blocks_served": 10,
+      "latency_ms": 450,
+      "model": "meta-llama/Meta-Llama-3.1-8B-Instruct"
+    }
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({"success": False, "error": "Request body required"}), 400
+
+    # Auth check — shared secret between gateway and Railway API
+    if WSI_GATEWAY_KEY and data.get("gateway_key") != WSI_GATEWAY_KEY:
+        return jsonify({"success": False, "error": "Invalid gateway key"}), 403
+
+    node_id = data.get("node_id", "").strip()
+    wallet = data.get("wallet", "").strip()
+    query_id = data.get("query_id", "").strip()
+    blocks_served = data.get("blocks_served", 0)
+    latency_ms = data.get("latency_ms", 0)
+    model = data.get("model", "unknown")
+
+    if not node_id or not wallet or not query_id:
+        return jsonify({"success": False, "error": "node_id, wallet, and query_id required"}), 400
+
+    record_contribution(node_id, wallet, query_id, blocks_served, latency_ms, model)
+
+    notify_wsi_discord(
+        "🧠 WSI Inference Contribution",
+        f"Node `{node_id[:16]}` served {blocks_served} blocks for query `{query_id}`",
+        color=0x9B59B6,
+        fields={"Model": model, "Latency": f"{latency_ms}ms", "Reward": f"{NODE_REWARD_PER_QUERY} WATT"}
+    )
+
+    return jsonify({
+        "success": True,
+        "message": "Contribution recorded and payout queued",
+        "reward_watt": NODE_REWARD_PER_QUERY
+    }), 200
+
+
+# =============================================================================
+# HEALTH
+# =============================================================================
+
+@wsi_bp.route('/api/v1/wsi/health', methods=['GET'])
+def wsi_health():
+    """Health check for WSI service."""
+    return jsonify({
+        "service": "wsi",
+        "version": "2.0.0",
+        "gateway_configured": bool(WSI_GATEWAY_URL),
+        "status": "ok"
     }), 200
