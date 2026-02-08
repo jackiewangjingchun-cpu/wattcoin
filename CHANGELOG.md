@@ -1,3 +1,56 @@
+## [February 8, 2026 - v3.5.0] - Clawbot Prompt Template, SwarmSolve Phase 2, Dashboard v3.4.0
+
+### Clawbot Prompt Template v1.0 (NEW)
+- `docs/CLAWBOT_TEMPLATE.md` — reusable prompt templates for AI agent bounty runs
+  - 5 phase templates: Discover, Plan, Implement, Submit, Self-Review
+  - Full-run single-prompt mode for simple bounties
+  - Common patterns cheat sheet (Discord alerts, data storage, error codes, Solana payments, GitHub API)
+- `clawbot_runner.py` — CLI tool to auto-populate templates from GitHub issues
+  - Usage: `python clawbot_runner.py <issue#> --phase full`
+  - Auto-extracts bounty amount, target files, scope, constraints from issue body
+  - Supports all phases: `discover | plan | implement | submit | full`
+
+### SwarmSolve Phase 2 — Customer UI Form
+- 3-step submission wizard on wattcoin.org/swarmsolve
+- Step 1: Project details (title, spec, budget, deadline, target repo, wallet, privacy checkbox)
+- Step 2: Fund escrow (shows wallet + memo with copy buttons, TX signature input)
+- Step 3: Review & submit (summary → confirmation with approval token + GitHub link)
+- Client-side validation + server-side error handling
+
+### SwarmSolve Auto-Expire
+- Solutions past deadline auto-refund to customer wallet on GET /api/v1/solutions
+- GitHub comment + Solscan TX link + Discord notification
+- Memo: `swarmsolve:expired:{solution_id}`
+
+### Dashboard v3.4.0
+- AI score badges (✅ 9/10 PASS / ⚠️ 7/10 / ❌ 4/10 FAIL)
+- Structured review JSON display
+- SwarmSolve live solutions section
+- Landing page Live Activity redesigned to 3-column card grid with pulse dots
+
+### Task Auto-Expiry
+- Expired tasks past deadline auto-transition to expired status
+- "All" tab hides expired by default, "Expired" tab added
+
+### Dev Wallet Lockup (Sablier)
+- 150M WATT locked in 2-year linear vest via Sablier (Token-2022 compatible)
+- Dev wallet retains 11.3M unlocked for operations
+- Discord transparency notices posted
+
+### Security & Privacy
+- AI review engine migrated Grok → Claude with hardened prompt
+- Pass threshold raised 8/10 → 9/10
+- Ban system + wallet requirement gate enforced
+- Privacy protection guide + quick checklist created
+- cb3tech GitHub exposure fix (8 PR reviews reposted as WattCoin-Org)
+- Clickable feature boxes (11 of 13 cards linked)
+- "On-Chain Escrow" moved from Coming Soon to live (SwarmSolve)
+
+### Contributors
+- Project Owner — Testing, debugging, strategy
+- Claude — Implementation
+- Grok — Code review, WSI technical analysis
+
 ## [February 8, 2026 - v3.3.0] - SwarmSolve Phase 1, Dev Supply Lock, Bounty Quality
 
 ### SwarmSolve Phase 1 — Escrow Bounty Marketplace (NEW)
