@@ -18,13 +18,13 @@ name: "my-wattnode"
 # =============================================================================
 capabilities:
   - scrape        # Web scraping (default, no extra setup)
-  # - inference   # LLM inference (requires Petals + NVIDIA GPU)
+  # - inference   # LLM inference (requires NVIDIA GPU + inference engine)
 
 # =============================================================================
 # WSI Inference Settings (requires NVIDIA GPU with ≥6GB VRAM)
 # Enable via the Inference tab in the GUI, or uncomment 'inference' above
 # =============================================================================
-petals:
+inference_engine:
   # Model to serve — must match the model other swarm nodes are hosting
   model: "meta-llama/Meta-Llama-3.1-8B-Instruct"
 
@@ -33,11 +33,11 @@ petals:
   # Llama 8B has 32 blocks total; 8GB GPU can serve ~20-25 blocks
   num_blocks: null
 
-  # P2P port for Petals swarm communication
+  # P2P port for swarm communication
   port: 31330
 
 # =============================================================================
-# Legacy: Ollama Settings (only if inference capability enabled without Petals)
+# Legacy: Ollama Settings (fallback if distributed inference unavailable)
 # =============================================================================
 ollama:
   url: "http://localhost:11434"
