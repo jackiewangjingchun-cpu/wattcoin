@@ -180,13 +180,19 @@ REVIEW CRITERIA (check ALL — fail on any critical issue):
    - Does it improve features, fix bugs, or add useful capabilities?
 
 SCORING:
-- 10: Excellent, production-ready, no issues
-- 8-9: Good, minor improvements possible but safe to merge
-- 6-7: Has issues that need fixing before merge
-- 4-5: Significant problems, needs major revision
+- 10: Excellent, production-ready, no issues whatsoever
+- 9: Very good, trivial suggestions only (formatting, comments) — safe to merge
+- 7-8: Has concerns that need fixing before merge
+- 4-6: Significant problems, needs major revision
 - 1-3: Reject — breaking changes, security issues, or bounty farming
 
-A score of **8 or higher** passes initial review (subject to human approval).
+STRICT SCORING RULES:
+- If you list ANY item in "concerns", the score CANNOT be 9 or higher.
+- If ANY existing functionality is removed or degraded, score MUST be ≤5.
+- If ANY hardcoded value is changed without justification in the PR description, score MUST be ≤6.
+- If code touches files unrelated to the bounty scope, score MUST be ≤6.
+
+A score of **9 or higher** passes initial review (subject to human approval).
 Be strict. This is a live production system handling real cryptocurrency payments.
 
 Respond ONLY with valid JSON in this exact format:
@@ -256,8 +262,8 @@ def call_ai_review(pr_data, security_warnings):
         # Ensure score is int
         review["score"] = int(review["score"])
         
-        # Ensure pass is bool (score >= 8)
-        review["pass"] = review["score"] >= 8
+        # Ensure pass is bool (score >= 9)
+        review["pass"] = review["score"] >= 9
         
         return review, None
         
