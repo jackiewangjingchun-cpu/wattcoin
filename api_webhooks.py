@@ -48,6 +48,7 @@ GITHUB_WEBHOOK_SECRET = os.getenv("GITHUB_WEBHOOK_SECRET", "")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 BASE_URL = os.getenv("BASE_URL", "https://wattcoin-production-81a7.up.railway.app")  # For internal API calls
 REPO = "WattCoin-Org/wattcoin"
+INTERNAL_REPO = "WattCoin-Org/wattcoin-internal"
 
 PR_REVIEWS_FILE = f"{DATA_DIR}/pr_reviews.json"
 PR_PAYOUTS_FILE = f"{DATA_DIR}/pr_payouts.json"
@@ -877,6 +878,273 @@ def save_banned_users(banned_set):
     with open(banned_file, 'w') as f:
         json.dump({"banned": sorted(banned_set), "updated": datetime.utcnow().isoformat() + "Z"}, f, indent=2)
 
+    banned_file = os.path.join(DATA_DIR, "banned_users.json")
+    os.makedirs(DATA_DIR, exist_ok=True)
+    with open(banned_file, 'w') as f:
+        json.dump({"banned": sorted(banned_set), "updated": datetime.utcnow().isoformat() + "Z"}, f, indent=2)
+
+
+# =============================================================================
+# INTERNAL PIPELINE HANDLER (simplified gates)
+# =============================================================================
+
+def handle_internal_pr_review(pr_number, action):
+    """
+    Handle PR from internal repo — simplified gates (no bans, wallet, rate limits, bounty guards).
+    Keeps: content security scan, AI review, security scan, auto-merge.
+    No payment on merge.
+    """
+    import requests as req
+    
+    print(f"[INTERNAL] PR #{pr_number} action={action} — internal pipeline", flush=True)
+    log_security_event("internal_pr_review_triggered", {
+        "pr_number": pr_number,
+        "action": action,
+        "repo": INTERNAL_REPO
+    })
+    
+    # Get PR data from internal repo
+    try:
+        pr_resp = req.get(f"https://api.github.com/repos/{INTERNAL_REPO}/pulls/{pr_number}",
+                         headers=github_headers(), timeout=10)
+        pr_data = pr_resp.json() if pr_resp.status_code == 200 else {}
+        pr_author = pr_data.get("user", {}).get("login", "unknown")
+    except:
+        pr_author = "unknown"
+        pr_data = {}
+    
+    # === CONTENT SECURITY GATE (catches accidental leaks before promotion) ===
+    try:
+        diff_resp = req.get(
+            f"https://api.github.com/repos/{INTERNAL_REPO}/pulls/{pr_number}",
+            headers={**github_headers(), "Accept": "application/vnd.github.v3.diff"},
+            timeout=15
+        )
+        pr_diff = diff_resp.text if diff_resp.status_code == 200 else ""
+        
+        files_resp = req.get(
+            f"https://api.github.com/repos/{INTERNAL_REPO}/pulls/{pr_number}/files",
+            headers=github_headers(), timeout=10
+        )
+        pr_files = files_resp.json() if files_resp.status_code == 200 else []
+        
+        from content_security import scan_pr_content, format_flags_for_log
+        scan_passed, scan_flags = scan_pr_content(pr_diff, pr_files, submitter_wallet=None)
+        
+        if not scan_passed:
+            flag_details = format_flags_for_log(scan_flags)
+            log_security_event("internal_pr_content_security_failed", {
+                "pr_number": pr_number,
+                "author": pr_author,
+                "flags": [f["type"] for f in scan_flags]
+            })
+            
+            post_github_comment_internal(pr_number,
+                "## 🛡️ Content Security Flag\n\n"
+                "This PR was flagged by content analysis. Check for accidental exposure of "
+                "personal info, API keys, or internal URLs before promoting.\n\n"
+                f"**Flags:** {', '.join(set(f['type'] for f in scan_flags))}\n\n"
+                "— Internal Pipeline"
+            )
+            print(f"[INTERNAL] PR #{pr_number} content security flagged", flush=True)
+            # Don't block — just warn (internal repo is private)
+        else:
+            print(f"[INTERNAL] PR #{pr_number} passed content scan", flush=True)
+    except Exception as e:
+        print(f"[INTERNAL] Content scan error PR #{pr_number}: {e}", flush=True)
+    
+    # Post initial comment
+    post_github_comment_internal(pr_number, "🤖 **AI review triggered...** Analyzing code changes...")
+    
+    # === AI REVIEW ===
+    review_result, review_error = trigger_ai_review_internal(pr_number)
+    
+    if review_error:
+        post_github_comment_internal(pr_number, f"❌ **Review failed:** {review_error}")
+        return jsonify({"message": "Review failed", "error": review_error}), 500
+    
+    review_data = review_result.get("review", {})
+    score = review_data.get("score", 0)
+    passed = review_data.get("pass", False)
+    
+    # Discord notification
+    review_verdict = "PASS ✅" if passed else "FAIL ❌"
+    notify_discord(
+        "🔧 Internal PR Review",
+        f"Internal PR #{pr_number} scored **{score}/10** — {review_verdict}",
+        color=0x00FF00 if passed else 0xFF0000,
+        fields={"PR": f"#{pr_number} (internal)", "Score": f"{score}/10", "Result": review_verdict}
+    )
+    
+    # Auto-merge if passed (no payment)
+    if passed and score >= 9:
+        # === SECURITY SCAN GATE (fail-closed) ===
+        from pr_security import ai_security_scan_pr
+        scan_passed_ai, scan_report, scan_ran = ai_security_scan_pr(pr_number, repo=INTERNAL_REPO)
+        
+        if not scan_passed_ai:
+            if scan_ran:
+                post_github_comment_internal(pr_number,
+                    f"## 🛡️ Security Scan Failed — Merge Blocked\n\n"
+                    f"**AI Score**: {score}/10 ✅\n"
+                    f"**Security Scan**: ❌ FAILED\n\n"
+                    f"```\n{scan_report[:500]}\n```"
+                )
+            else:
+                post_github_comment_internal(pr_number,
+                    f"## ⚠️ Security Scan Unavailable — Merge Blocked\n\n"
+                    f"**AI Score**: {score}/10 ✅\n"
+                    f"**Security Scan**: ⚠️ UNAVAILABLE\n\n"
+                    f"*Reason: {scan_report}*"
+                )
+            return jsonify({"message": "Security scan blocked merge", "pr": pr_number}), 200
+        
+        # Auto-merge
+        merged, merge_error = auto_merge_pr_internal(pr_number, score)
+        if merged:
+            post_github_comment_internal(pr_number,
+                f"✅ **Auto-merged!** AI score: {score}/10\n\n"
+                f"Ready for promotion to public repo."
+            )
+        else:
+            post_github_comment_internal(pr_number,
+                f"⚠️ **Review passed** ({score}/10) but auto-merge failed: {merge_error}\n\nMerge manually."
+            )
+    
+    return jsonify({"message": "Internal review completed", "score": score, "passed": passed}), 200
+
+
+def post_github_comment_internal(pr_number, body):
+    """Post comment on internal repo PR."""
+    import requests as req
+    try:
+        req.post(
+            f"https://api.github.com/repos/{INTERNAL_REPO}/issues/{pr_number}/comments",
+            headers=github_headers(), timeout=10,
+            json={"body": body}
+        )
+    except Exception as e:
+        print(f"[INTERNAL] Comment failed PR #{pr_number}: {e}", flush=True)
+
+
+def trigger_ai_review_internal(pr_number):
+    """Trigger AI review for internal repo PR. Uses same review logic, different repo."""
+    import requests as req
+    
+    try:
+        # Get PR details from internal repo
+        pr_resp = req.get(f"https://api.github.com/repos/{INTERNAL_REPO}/pulls/{pr_number}",
+                         headers=github_headers(), timeout=10)
+        if pr_resp.status_code != 200:
+            return None, f"Failed to fetch PR #{pr_number} from internal repo"
+        pr_data = pr_resp.json()
+        
+        # Get diff
+        diff_resp = req.get(
+            f"https://api.github.com/repos/{INTERNAL_REPO}/pulls/{pr_number}",
+            headers={**github_headers(), "Accept": "application/vnd.github.v3.diff"},
+            timeout=15
+        )
+        diff_text = diff_resp.text if diff_resp.status_code == 200 else ""
+        
+        # Get files
+        files_resp = req.get(
+            f"https://api.github.com/repos/{INTERNAL_REPO}/pulls/{pr_number}/files",
+            headers=github_headers(), timeout=10
+        )
+        files = files_resp.json() if files_resp.status_code == 200 else []
+        
+        # Build PR info dict (same format as public pipeline)
+        pr_info = {
+            "number": pr_number,
+            "title": pr_data.get("title", ""),
+            "body": pr_data.get("body", "") or "",
+            "author": pr_data.get("user", {}).get("login", "unknown"),
+            "diff": diff_text,
+            "files": files,
+            "additions": pr_data.get("additions", 0),
+            "deletions": pr_data.get("deletions", 0),
+            "changed_files": pr_data.get("changed_files", 0)
+        }
+        
+        # Call AI review (same function as public)
+        from admin_blueprint import call_ai_review
+        review_result = call_ai_review(pr_info)
+        
+        if review_result:
+            # Store review with repo tag
+            reviews = load_json_data(PR_REVIEWS_FILE, default={"reviews": []})
+            review_record = {
+                "pr_number": pr_number,
+                "repo": INTERNAL_REPO,
+                "review": review_result.get("review", review_result),
+                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "author": pr_info["author"]
+            }
+            reviews["reviews"].append(review_record)
+            save_json_data(PR_REVIEWS_FILE, reviews)
+            
+            # Post detailed review comment
+            review_data = review_result.get("review", review_result)
+            score = review_data.get("score", 0)
+            summary = review_data.get("summary", review_data.get("feedback", "No summary"))
+            passed = review_data.get("pass", score >= 9)
+            
+            icon = "✅" if passed else "❌"
+            
+            # Build dimensions display
+            dims_text = ""
+            dimensions = review_data.get("dimensions", {})
+            if dimensions:
+                dims_lines = []
+                for name, dim in dimensions.items():
+                    if isinstance(dim, dict) and "score" in dim:
+                        s = dim["score"]
+                        dim_icon = "✅" if s >= 8 else "⚠️" if s >= 5 else "❌"
+                        label = name.replace("_", " ").title()
+                        dims_lines.append(f"  {dim_icon} **{label}**: {s}/10")
+                dims_text = "\n".join(dims_lines)
+            
+            comment = f"## 🤖 AI Review — {icon} {score}/10\n\n{summary}\n"
+            if dims_text:
+                comment += f"\n### Dimensions\n{dims_text}\n"
+            
+            concerns = review_data.get("concerns", [])
+            if concerns:
+                comment += f"\n### Concerns\n" + "\n".join(f"- {c}" for c in concerns) + "\n"
+            
+            comment += f"\n*Internal pipeline — {'auto-merge eligible' if passed else 'manual review needed'}*"
+            post_github_comment_internal(pr_number, comment)
+            
+            return review_result, None
+        else:
+            return None, "AI review returned no result"
+            
+    except Exception as e:
+        print(f"[INTERNAL] AI review error PR #{pr_number}: {e}", flush=True)
+        return None, str(e)
+
+
+def auto_merge_pr_internal(pr_number, score):
+    """Auto-merge PR on internal repo."""
+    import requests as req
+    try:
+        merge_resp = req.put(
+            f"https://api.github.com/repos/{INTERNAL_REPO}/pulls/{pr_number}/merge",
+            headers=github_headers(), timeout=10,
+            json={
+                "commit_title": f"Auto-merge internal PR #{pr_number} (AI score: {score}/10)",
+                "merge_method": "squash"
+            }
+        )
+        if merge_resp.status_code == 200:
+            return True, None
+        else:
+            return False, merge_resp.json().get("message", "Unknown error")
+    except Exception as e:
+        return False, str(e)
+
+
 def handle_pr_review_trigger(pr_number, action):
     """
     Handle PR opened or synchronized - trigger AI review and auto-merge if passed.
@@ -1318,6 +1586,40 @@ def github_webhook():
             })
             return jsonify({"error": "Malformed payload: missing PR number"}), 400
     
+    # === REPO DETECTION — Route internal repo events to simplified pipeline ===
+    webhook_repo = payload.get("repository", {}).get("full_name", "")
+    if webhook_repo == INTERNAL_REPO:
+        print(f"[WEBHOOK:{request_id}] Internal repo event: {event_type}", flush=True)
+        
+        # Internal repo: only handle pull_request events (no bounty/issue processing)
+        if event_type != 'pull_request':
+            elapsed = time.time() - start_time
+            return jsonify({"message": f"Internal repo — ignoring {event_type}"}), 200
+        
+        action = payload.get("action")
+        pr = payload.get("pull_request", {})
+        pr_number = pr.get("number")
+        merged = pr.get("merged", False)
+        
+        if action in ["opened", "synchronize"]:
+            # Trigger internal AI review (simplified gates)
+            result = handle_internal_pr_review(pr_number, action)
+            elapsed = time.time() - start_time
+            print(f"[WEBHOOK:{request_id}] Internal review completed in {elapsed:.2f}s", flush=True)
+            return result
+        elif action == "closed" and merged:
+            # Internal merge — no payment, just log
+            print(f"[WEBHOOK:{request_id}] Internal PR #{pr_number} merged — no payment", flush=True)
+            notify_discord(
+                "🔧 Internal PR Merged",
+                f"PR #{pr_number} merged on internal repo. Ready for promotion.",
+                color=0x00FF00,
+                fields={"PR": f"#{pr_number} (internal)"}
+            )
+            return jsonify({"message": f"Internal PR #{pr_number} merged — no payment"}), 200
+        else:
+            return jsonify({"message": f"Internal repo — ignoring action: {action}"}), 200
+
     # Handle issues events — bounty creation notifications
     if event_type == 'issues':
         issue_action = payload.get("action")
