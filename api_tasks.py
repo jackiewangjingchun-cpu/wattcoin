@@ -146,7 +146,9 @@ def queue_payout(wallet, amount, task_id):
 def ai_verify_submission(task, submission):
     """
     Use AI to verify task completion quality.
-    Returns (score, feedback) tuple.
+    Returns (score, feedback, extra) tuple.
+    extra is a dict with dimensions, confidence, novel_patterns for WSI training data.
+    For backward compat, callers using (score, feedback) = ... will still work via unpacking.
     """
     def _is_retryable_error(err: Exception) -> bool:
         status = getattr(err, "status_code", None)
@@ -170,33 +172,88 @@ def ai_verify_submission(task, submission):
             logger.error("AI_API_KEY not set — cannot verify")
             return -1, "AI verification unavailable (missing AI_API_KEY)"
 
-        timeout_s = int(os.getenv("AI_VERIFY_TIMEOUT_SECONDS", "30"))
+        timeout_s = int(os.getenv("AI_VERIFY_TIMEOUT_SECONDS", "60"))
         max_attempts = int(os.getenv("AI_VERIFY_MAX_ATTEMPTS", "3"))
         backoff_s = [1, 2, 4]
 
         client = OpenAI(api_key=ai_key, base_url="https://api.x.ai/v1")
 
-        verify_prompt = f"""You are a task verification AI for the WattCoin Agent Task Marketplace.
+        # Build requirements list for per-requirement checklist
+        requirements_raw = task.get('requirements', 'None specified')
+        if isinstance(requirements_raw, list):
+            requirements_text = "\n".join(f"- {r}" for r in requirements_raw)
+        else:
+            requirements_text = str(requirements_raw)
 
-Review this task submission and score it 1-10.
+        verify_prompt = f"""You are a task verification AI for the WattCoin Agent Task Marketplace. Agents earn WATT tokens by completing tasks that improve the WattCoin ecosystem. Your job is to evaluate whether submitted work meets the task requirements and is worth paying for.
 
-TASK:
+TASK SPECIFICATION:
 - Title: {task.get('title', 'N/A')}
 - Description: {task.get('description', 'N/A')}
 - Type: {task.get('type', 'N/A')}
-- Requirements: {task.get('requirements', 'None specified')}
+- Requirements: {requirements_text}
+- WATT Reward: {task.get('reward', 'N/A')}
 
 SUBMISSION:
 {submission.get('result', 'No result provided')}
 
-Score criteria:
-- Does the submission address the task requirements?
-- Is the quality acceptable?
-- Is it complete or partial?
+VERIFICATION DIMENSIONS (score each 1-10):
 
-Respond in this exact format:
-SCORE: <1-10>
-FEEDBACK: <brief explanation>"""
+1. **Requirement Coverage (CRITICAL)**
+   Does the submission address ALL stated requirements? List each requirement and mark met/unmet. Partial completion = proportional score.
+
+2. **Quality & Depth (HIGH)**
+   Is the work thorough and professional? Does it demonstrate genuine effort or is it surface-level/AI-generated-without-review filler? For research tasks: are claims supported? For content: is it original and useful? For code: does it work?
+
+3. **Accuracy (HIGH)**
+   Is the information correct? Are code snippets functional? Are recommendations sound? Flag any factual errors, broken links, or non-functional code.
+
+4. **Usefulness to Ecosystem (MEDIUM)**
+   Would this deliverable actually help WattCoin? Could it be used as-is or does it need significant rework? Does it create lasting value?
+
+5. **Completeness (MEDIUM)**
+   Is the submission a finished deliverable or a rough draft? Missing sections, TODO placeholders, incomplete analysis = lower score.
+
+SCORING:
+- 10: Exceptional — exceeds requirements, immediately usable
+- 8-9: Solid — meets all requirements with good quality
+- 6-7: Adequate — meets most requirements but has gaps
+- 4-5: Below standard — significant gaps or quality issues
+- 1-3: Reject — does not meet requirements, low effort, or farming attempt
+
+THRESHOLD: Score >= 7 to pass verification. Below 7 = task reopened for other agents.
+
+TRAINING CONTEXT: Your evaluation will be used as labeled training data for a self-improving code intelligence model (WSI). To maximize training signal quality:
+- Be explicit about your reasoning for EVERY dimension scored. Do not give surface-level assessments.
+- Name specific patterns you identified (positive or negative) and explain WHY they matter.
+- When scoring, explain what would move the score higher or lower.
+- If you detect novel approaches or techniques, call them out explicitly.
+- Your reasoning is as valuable as your verdict — a vague "looks good" teaches nothing.
+
+Respond ONLY with valid JSON in this exact format:
+{{
+  "pass": true,
+  "score": 8,
+  "confidence": "HIGH",
+  "dimensions": {{
+    "requirement_coverage": {{
+      "score": 8,
+      "reasoning": "Explanation of coverage assessment",
+      "requirements_checklist": [
+        {{"requirement": "requirement text", "met": true, "notes": "details"}}
+      ]
+    }},
+    "quality_depth": {{"score": 8, "reasoning": "...", "patterns": [], "improvement": "..."}},
+    "accuracy": {{"score": 8, "reasoning": "...", "errors_found": [], "improvement": "..."}},
+    "usefulness": {{"score": 8, "reasoning": "...", "patterns": [], "improvement": "..."}},
+    "completeness": {{"score": 8, "reasoning": "...", "missing": [], "improvement": "..."}}
+  }},
+  "summary": "2-3 sentence overall assessment",
+  "flags": [],
+  "novel_patterns": []
+}}
+
+Do not include any text before or after the JSON."""
 
         last_err: Exception | None = None
         response = None
@@ -205,7 +262,7 @@ FEEDBACK: <brief explanation>"""
                 response = client.chat.completions.create(
                     model="grok-3",
                     messages=[{"role": "user", "content": verify_prompt}],
-                    max_tokens=500,
+                    max_tokens=1500,
                     timeout=timeout_s,
                 )
                 break
@@ -227,31 +284,65 @@ FEEDBACK: <brief explanation>"""
             raise last_err or RuntimeError("AI verification failed without response")
 
         content = response.choices[0].message.content
-        
-        # Parse score
+
+        # --- Parse response: JSON-first, fallback to legacy SCORE:/FEEDBACK: ---
         score = 0
         feedback = content
-        found_score = False
-        for line in content.split('\n'):
-            if line.strip().upper().startswith('SCORE:'):
-                try:
-                    score = int(line.split(':')[1].strip().split('/')[0].strip())
-                    found_score = True
-                except (ValueError, IndexError):
-                    score = 0
-            elif line.strip().upper().startswith('FEEDBACK:'):
-                feedback = line.split(':', 1)[1].strip()
+        extra = {}
 
-        if not found_score:
-            # Malformed model response; avoid re-opening the task and losing the submission.
-            return -1, f"Verification error (pending manual review): malformed AI response: {content[:500]}"
+        # Try JSON parse
+        try:
+            # Strip markdown fences if present
+            json_text = content.strip()
+            if json_text.startswith("```"):
+                json_text = json_text.split("\n", 1)[1] if "\n" in json_text else json_text[3:]
+                if json_text.endswith("```"):
+                    json_text = json_text[:-3]
+                json_text = json_text.strip()
 
-        return min(max(score, 0), 10), feedback
+            parsed = json.loads(json_text)
+
+            # Extract score (required)
+            if "score" in parsed:
+                score = int(parsed["score"])
+                # Use summary as feedback, fall back to full content
+                feedback = parsed.get("summary", content)
+                # Store WSI training data
+                extra = {
+                    "confidence": parsed.get("confidence", "UNKNOWN"),
+                    "dimensions": parsed.get("dimensions", {}),
+                    "novel_patterns": parsed.get("novel_patterns", []),
+                    "flags": parsed.get("flags", []),
+                    "suggested_changes": parsed.get("suggested_changes", []),
+                    "raw_json": parsed
+                }
+                logger.info("Task verification parsed as JSON: score=%d confidence=%s", score, extra.get("confidence"))
+            else:
+                raise ValueError("No score field in JSON")
+
+        except (json.JSONDecodeError, ValueError, KeyError) as json_err:
+            # Fallback: legacy SCORE:/FEEDBACK: format
+            logger.info("Task verification JSON parse failed (%s), trying legacy format", str(json_err)[:80])
+            found_score = False
+            for line in content.split('\n'):
+                if line.strip().upper().startswith('SCORE:'):
+                    try:
+                        score = int(line.split(':')[1].strip().split('/')[0].strip())
+                        found_score = True
+                    except (ValueError, IndexError):
+                        score = 0
+                elif line.strip().upper().startswith('FEEDBACK:'):
+                    feedback = line.split(':', 1)[1].strip()
+
+            if not found_score:
+                return -1, f"Verification error (pending manual review): malformed AI response: {content[:500]}"
+
+        return min(max(score, 0), 10), feedback, extra
 
     except Exception as e:
         logger.error("AI verification failed: %s", str(e))
         # Special sentinel score indicates the task should be put into pending_review.
-        return -1, f"Verification error (pending manual review): {str(e)}"
+        return -1, f"Verification error (pending manual review): {str(e)}", {}
 
 
 # === Expiration Check ===
@@ -632,14 +723,24 @@ def verify_task(task_id):
     # Run AI verification (with retries). If AI is unavailable, mark as pending_review
     # so we don't accidentally re-open/lose the submission.
     submission = task.get("submission", {})
-    score, feedback = ai_verify_submission(task, submission)
+    result = ai_verify_submission(task, submission)
+    # Unpack: 3-tuple (score, feedback, extra) from upgraded prompt, or 2-tuple fallback
+    if len(result) == 3:
+        score, feedback, extra = result
+    else:
+        score, feedback = result
+        extra = {}
 
     now = datetime.now(timezone.utc).isoformat()
     task["verification"] = {
         "score": score,
         "feedback": feedback,
         "threshold": VERIFY_THRESHOLD,
-        "verified_at": now
+        "verified_at": now,
+        "confidence": extra.get("confidence", "UNKNOWN"),
+        "dimensions": extra.get("dimensions", {}),
+        "novel_patterns": extra.get("novel_patterns", []),
+        "flags": extra.get("flags", [])
     }
     task["verified_at"] = now
 
@@ -674,7 +775,7 @@ def verify_task(task_id):
             "✅ Task Completed & Paid",
             f"**{task.get('title', 'Unknown')}**\n{worker_payout:,} WATT paid to `{claimer_wallet[:8]}...`",
             color=0x00FF00,
-            fields={"Score": f"{score}/10", "Task ID": task_id, "Type": task.get("type", "N/A")}
+            fields={"Score": f"{score}/10", "Confidence": extra.get("confidence", "N/A"), "Task ID": task_id, "Type": task.get("type", "N/A")}
         )
 
         # Check if this subtask completing finishes a parent task
