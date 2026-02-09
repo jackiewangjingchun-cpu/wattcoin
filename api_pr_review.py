@@ -40,6 +40,7 @@ pr_review_bp = Blueprint('pr_review', __name__)
 AI_API_KEY = os.getenv("AI_REVIEW_API_KEY", "")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 REPO = "WattCoin-Org/wattcoin"
+INTERNAL_REPO = "WattCoin-Org/wattcoin-internal"
 
 PR_REVIEWS_FILE = f"{DATA_DIR}/pr_reviews.json"
 
@@ -144,67 +145,112 @@ Code Diff:
 
 Dangerous patterns already flagged: {security_warnings}
 
-REVIEW CRITERIA (check ALL — fail on any critical issue):
+Contributor Context:
+- Merit Tier: {merit_tier}
+- Average Score: {avg_score}
+- Completed PRs: {completed_prs}
 
-1. **Breaking Change Detection** (CRITICAL)
+REVIEW DIMENSIONS (score each 1-10, then overall):
+
+1. **Breaking Change Detection** (CRITICAL — weight 2x)
    - Flag ANY removal of existing functionality, env var support, or config values.
    - Compare what the code does NOW vs what the PR changes it to.
-   - Silent downgrades (e.g. removing Redis support, changing defaults) = automatic score ≤5.
+   - Silent downgrades (e.g., removing feature support, changing defaults) = automatic score ≤5.
+   - List every behavioral change explicitly.
 
-2. **Value Change Audit** (CRITICAL)
+2. **Value Change Audit** (CRITICAL — weight 2x)
    - If the PR changes hardcoded values (rate limits, timeouts, thresholds, versions), list EACH change with old → new.
-   - Unjustified value changes = lower score. All changes must be explained in the PR description.
+   - Unjustified value changes = lower score. All changes must be explained in PR description.
 
 3. **Scope & Bounty Integrity** (HIGH)
    - Changes MUST match the PR title and bounty description. No unrelated modifications.
-   - If the PR modifies core infrastructure files (bridge_web.py, api_nodes.py, api_webhooks.py) beyond what the bounty requires, flag as scope creep.
-   - Identical code appearing across multiple PRs from the same author = bounty farming signal. Flag it.
+   - If the PR modifies core infrastructure files beyond what the bounty requires, flag as scope creep.
+   - Identical code appearing across multiple PRs from the same author = bounty farming signal.
 
 4. **Security** (HIGH)
    - No vulnerabilities, backdoors, hardcoded secrets, suspicious patterns.
    - No exposure of internal env var names or vendor-specific references in public-facing code.
    - No removal of existing security measures.
+   - Note: This is a preliminary check. A dedicated security audit runs separately.
 
 5. **Code Quality** (MEDIUM)
    - Clean, readable, follows existing patterns in the codebase.
-   - No dead code (functions defined but never called).
-   - No duplicate logic (same thing done twice in different places).
+   - No dead code, duplicate logic, or unnecessary complexity.
+   - Proper error handling, logging, and edge case coverage.
 
 6. **Test Validity** (MEDIUM)
-   - If tests are included, verify they use real methods/APIs of the libraries involved.
-   - Tests that would throw errors on execution (e.g. calling nonexistent methods) = flag as untested.
-   - Tests that cannot actually run = worse than no tests.
+   - If tests are included, verify they use real methods/APIs and would actually pass.
+   - Tests that call nonexistent methods or cannot execute = flag as untested.
 
 7. **Functionality** (MEDIUM)
-   - Does it actually solve the stated task? Fully, or partially?
+   - Does it solve the stated task fully, not partially?
    - Does it improve features, fix bugs, or add useful capabilities?
+   - Would this code survive production traffic?
 
 SCORING:
 - 10: Excellent, production-ready, no issues whatsoever
-- 9: Very good, trivial suggestions only (formatting, comments) — safe to merge
+- 9: Very good, trivial suggestions only — safe to merge
 - 7-8: Has concerns that need fixing before merge
 - 4-6: Significant problems, needs major revision
 - 1-3: Reject — breaking changes, security issues, or bounty farming
 
 STRICT SCORING RULES:
-- If you list ANY item in "concerns", the score CANNOT be 9 or higher.
+- If you list ANY item in concerns, the score CANNOT be 9 or higher.
 - If ANY existing functionality is removed or degraded, score MUST be ≤5.
-- If ANY hardcoded value is changed without justification in the PR description, score MUST be ≤6.
+- If ANY hardcoded value is changed without justification, score MUST be ≤6.
 - If code touches files unrelated to the bounty scope, score MUST be ≤6.
 
-A score of **9 or higher** passes initial review (subject to human approval).
+A score of 9 or higher passes initial review (subject to human approval).
 Be strict. This is a live production system handling real cryptocurrency payments.
+
+TRAINING CONTEXT: Your evaluation will be used as labeled training data for a self-improving code intelligence model (WSI). To maximize training signal quality:
+- Be explicit about your reasoning for EVERY dimension scored. Do not give surface-level assessments.
+- Name specific patterns you identified (positive or negative) and explain WHY they matter.
+- When scoring, explain what would move the score higher or lower.
+- If you detect novel approaches or techniques, call them out explicitly.
+- Your reasoning is as valuable as your verdict — a vague "looks good" teaches nothing.
 
 Respond ONLY with valid JSON in this exact format:
 {{
   "pass": true/false,
   "score": 1-10,
-  "feedback": "Brief summary of review (2-3 sentences)",
+  "confidence": "HIGH/MEDIUM/LOW",
+  "dimensions": {{
+    "breaking_changes": {{"score": 0, "reasoning": "...", "patterns": [], "improvement": "..."}},
+    "value_changes": {{"score": 0, "reasoning": "...", "patterns": [], "improvement": "..."}},
+    "scope_integrity": {{"score": 0, "reasoning": "...", "patterns": [], "improvement": "..."}},
+    "security": {{"score": 0, "reasoning": "...", "patterns": [], "improvement": "..."}},
+    "code_quality": {{"score": 0, "reasoning": "...", "patterns": [], "improvement": "..."}},
+    "test_validity": {{"score": 0, "reasoning": "...", "patterns": [], "improvement": "..."}},
+    "functionality": {{"score": 0, "reasoning": "...", "patterns": [], "improvement": "..."}}
+  }},
+  "summary": "2-3 sentence overall assessment",
   "suggested_changes": ["specific change 1", "specific change 2"],
-  "concerns": ["security concern 1", "quality concern 2"]
+  "concerns": ["concern 1"],
+  "novel_patterns": ["any interesting approaches worth noting"]
 }}
 
 Do not include any text before or after the JSON."""
+
+def get_contributor_context(github_username):
+    """
+    Pull merit data for a contributor to include in AI review prompt.
+    Returns dict with merit_tier, avg_score, completed_prs.
+    """
+    try:
+        from api_reputation import build_contributor_list
+        contributors = build_contributor_list()
+        for c in contributors:
+            if c["github"].lower() == github_username.lower():
+                return {
+                    "merit_tier": c.get("tier", "new"),
+                    "avg_score": c.get("score", 0),
+                    "completed_prs": len(c.get("merged_prs", []))
+                }
+    except Exception as e:
+        print(f"[REVIEW] Could not load contributor context: {e}", flush=True)
+    
+    return {"merit_tier": "new", "avg_score": 0, "completed_prs": 0}
 
 def call_ai_review(pr_data, security_warnings):
     """
@@ -226,21 +272,28 @@ def call_ai_review(pr_data, security_warnings):
                 for w in security_warnings[:5]
             ])
         
+        # Get contributor context
+        author = pr_data.get("user", {}).get("login", "unknown")
+        contributor = get_contributor_context(author)
+        
         prompt = AI_REVIEW_PROMPT.format(
             pr_number=pr_data.get("number"),
             title=pr_data.get("title", ""),
-            author=pr_data.get("user", {}).get("login", "unknown"),
+            author=author,
             files_changed=pr_data.get("changed_files", 0),
             additions=pr_data.get("additions", 0),
             deletions=pr_data.get("deletions", 0),
             body=pr_data.get("body", "")[:500],
             diff=diff_text,
-            security_warnings=warnings_text
+            security_warnings=warnings_text,
+            merit_tier=contributor["merit_tier"],
+            avg_score=contributor["avg_score"],
+            completed_prs=contributor["completed_prs"]
         )
         
         # Call AI via shared provider
         from ai_provider import call_ai
-        result_text, ai_error = call_ai(prompt, temperature=0.3, max_tokens=1000, timeout=60)
+        result_text, ai_error = call_ai(prompt, temperature=0.3, max_tokens=2000, timeout=90)
         
         if ai_error:
             return None, ai_error
@@ -254,16 +307,31 @@ def call_ai_review(pr_data, security_warnings):
         
         review = json.loads(result_text)
         
-        # Validate required fields
-        required = ["pass", "score", "feedback"]
-        if not all(k in review for k in required):
-            return None, f"Invalid AI response format: missing fields"
+        # Validate required fields (backward compatible)
+        if "score" not in review:
+            return None, f"Invalid AI response format: missing score"
         
         # Ensure score is int
         review["score"] = int(review["score"])
         
         # Ensure pass is bool (score >= 9)
         review["pass"] = review["score"] >= 9
+        
+        # Normalize: support both old "feedback" and new "summary" field
+        if "summary" not in review and "feedback" in review:
+            review["summary"] = review["feedback"]
+        elif "feedback" not in review and "summary" in review:
+            review["feedback"] = review["summary"]
+        elif "summary" not in review and "feedback" not in review:
+            review["summary"] = ""
+            review["feedback"] = ""
+        
+        # Ensure new fields have defaults if missing
+        review.setdefault("confidence", "MEDIUM")
+        review.setdefault("dimensions", {})
+        review.setdefault("novel_patterns", [])
+        review.setdefault("suggested_changes", [])
+        review.setdefault("concerns", [])
         
         return review, None
         
@@ -451,12 +519,33 @@ def review_pr():
     # Post comment on PR
     comment = f"""## 🤖 AI Review Results
 
-**Score**: {review_result['score']}/10
+**Score**: {review_result['score']}/10 | **Confidence**: {review_result.get('confidence', 'N/A')}
 **Status**: {'✅ PASS' if review_result['pass'] else '❌ FAIL'}
 
-**Feedback**: {review_result['feedback']}
+**Summary**: {review_result.get('summary', review_result.get('feedback', ''))}
 
 """
+    
+    # Add dimension scores if available
+    dimensions = review_result.get("dimensions", {})
+    if dimensions:
+        comment += "**Dimension Scores**:\n"
+        dim_labels = {
+            "breaking_changes": "Breaking Changes (2x)",
+            "value_changes": "Value Changes (2x)",
+            "scope_integrity": "Scope Integrity",
+            "security": "Security",
+            "code_quality": "Code Quality",
+            "test_validity": "Test Validity",
+            "functionality": "Functionality"
+        }
+        for key, label in dim_labels.items():
+            dim = dimensions.get(key, {})
+            if isinstance(dim, dict) and "score" in dim:
+                score = dim["score"]
+                icon = "✅" if score >= 8 else ("⚠️" if score >= 5 else "❌")
+                comment += f"- {icon} {label}: {score}/10\n"
+        comment += "\n"
     
     if review_result.get("suggested_changes"):
         comment += "**Suggested Changes**:\n"
@@ -472,6 +561,13 @@ def review_pr():
     
     if not is_safe:
         comment += f"**⚠️ Security Warnings Detected**: {len(security_warnings)} potential issues found in code scan.\n\n"
+    
+    novel = review_result.get("novel_patterns", [])
+    if novel:
+        comment += "**Notable Patterns**:\n"
+        for pattern in novel:
+            comment += f"- 💡 {pattern}\n"
+        comment += "\n"
     
     if review_result["pass"]:
         comment += "*This PR has passed initial automated review. A maintainer will review for final approval and merge.*\n"
