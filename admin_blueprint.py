@@ -497,50 +497,16 @@ def call_ai_review_internal(pr_info):
     if pr_info.get("files"):
         files_list = ", ".join(f.get("filename", "") for f in pr_info["files"][:20])
 
+    # Load sensitive architecture context from env var (never in git)
+    internal_context = os.getenv("WSI_INTERNAL_CONTEXT", "")
+    if not internal_context:
+        # Fallback: use generic review (same as public) if env var not set
+        print("[INTERNAL-REVIEW] WSI_INTERNAL_CONTEXT not set — falling back to generic review", flush=True)
+        return call_ai_review(pr_info)
+
     prompt = f"""You are the senior code reviewer for WattCoin's internal development pipeline. Your reviews serve dual purposes: (1) ensuring production quality for critical infrastructure, and (2) generating high-fidelity training data for WSI, WattCoin's self-improving code intelligence model.
 
-## Project Context
-
-WattCoin (WATT) is a live Solana utility token powering an autonomous AI agent economy. The system processes real cryptocurrency payments, manages automated bounty programs, and coordinates distributed computing work — all running in production on Railway.
-
-### Architecture Overview
-- **Backend**: Python/Flask API deployed on Railway (single service)
-- **Frontend**: React/Next.js on Vercel (wattcoin.org)
-- **Blockchain**: Solana Token-2022 (SPL token with extensions)
-- **AI Integration**: Grok API for code review, bounty evaluation, security scanning
-- **GitHub Automation**: Webhooks process PRs → AI review → auto-merge → queued payout
-
-### Core Systems (handle with extreme care)
-- **Payment Queue** (api_webhooks.py): Merge → queue → post-deploy payout. Queue-based to prevent bad code from triggering payments before Railway redeploy confirms stability.
-- **Bounty Pipeline**: Issue created → AI evaluates → bounty labeled → PR submitted → AI reviews → security scan → auto-merge if ≥9/10 → payment queued → on-chain payout with memo + PR comment.
-- **Security Gates** (7 layers, order matters): Banned user → System account bypass → Wallet requirement → Content security scan → Duplicate bounty guard → AI review rate limit → AI security audit (fail-closed).
-- **Merit System**: Per-contributor scoring (review avg, completion rate, impact). Tiers: Bronze/Silver (+10%)/Gold (+20%). Universal ≥9/10 quality floor for auto-merge.
-- **SwarmSolve**: Customer escrow marketplace. Prepare → Fund → Claim → Submit → AI audit → Customer approve/refund. 5% treasury fee. Fail-closed security.
-- **Content Security** (content_security.py): Pre-AI-review scanner for wallet injection, fabricated mechanisms, internal URL leaks.
-- **WattNode**: Distributed compute client. Node registration, job routing, heartbeat, reliability scoring, payout bonuses by tier.
-- **WSI**: Self-improving code intelligence (Phase 0 — data collection). This review IS WSI training data.
-
-### Key Patterns & Conventions
-- **Fail-closed security**: If any security service is unavailable, BLOCK (never skip).
-- **Queue-based payments**: Never pay before deploy confirmation.
-- **Env var configuration**: All operational params (rate limits, thresholds, payouts) are Railway env vars — zero code changes to tune.
-- **Discord alerts**: Green (success + Solscan link), Orange (warning), Red (failure). Webhook env var DISCORD_WEBHOOK_URL.
-- **On-chain memos**: Every payment includes structured memo for audit trail.
-- **Data files**: JSON in data/ directory for state (reviews, merit, bans, rate limits).
-- **Privacy**: No personal names in public content. "Project Owner" or "Team" only.
-- **Vendor neutrality**: No vendor names (AI provider, cloud host) in public-facing code/UI.
-
-### Wallet Addresses (for reference)
-- Treasury: Atu5phbGGGFogbKhi259czz887dSdTfXwJxwbuE5aF5q
-- Bounty: 7vvNkG3JF3JpxLEavqZSkc5T3n9hHR98Uw23fbWdXVSF
-- Tip: 7tYQQX8Uhx86oKPQLNwuYnqmGmdkm2hSSkx3N2KDWqYL
-
-### Known Attack Patterns (from real incidents)
-- Wallet injection: Embedding attacker wallet in docs/templates so contributors copy-paste it
-- Fabricated mechanisms: Inventing fake "staking requirements" to trick users into sending tokens
-- Bounty farming: Low-effort PRs from new accounts targeting easy bounties
-- Scope creep: Touching payment/security files beyond what the bounty requires
-- Internal URL exposure: Leaking Railway URLs in public-facing content
+{internal_context}
 
 ---
 
