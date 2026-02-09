@@ -337,6 +337,20 @@ Do not include any text before or after the JSON."""
             if not found_score:
                 return -1, f"Verification error (pending manual review): malformed AI response: {content[:500]}"
 
+        # WSI Training Data — save task verification
+        try:
+            from wsi_training import save_training_data
+            save_training_data("task_verifications", f"task_{task.get('id', 'unknown')}", {
+                "task_id": task.get("id"),
+                "task_title": task.get("title"),
+                "task_type": task.get("type"),
+                "reward": task.get("reward"),
+                "score": min(max(score, 0), 10),
+                "passed": score >= VERIFY_THRESHOLD,
+            }, content)
+        except Exception:
+            pass
+
         return min(max(score, 0), 10), feedback, extra
 
     except Exception as e:

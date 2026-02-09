@@ -123,6 +123,19 @@ def evaluate_bounty_request(issue_title, issue_body, existing_labels=[]):
         result = parse_ai_bounty_response(ai_output)
         result["raw_output"] = ai_output
         
+        # WSI Training Data — save evaluation for future fine-tuning
+        try:
+            from wsi_training import save_training_data
+            save_training_data("bounty_evaluations", f"issue_{issue_title[:30]}", {
+                "issue_title": issue_title,
+                "decision": result.get("decision"),
+                "score": result.get("score"),
+                "amount": result.get("amount"),
+                "labels": existing_labels,
+            }, ai_output)
+        except Exception:
+            pass
+
         return result
         
     except Exception as e:

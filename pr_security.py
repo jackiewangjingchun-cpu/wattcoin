@@ -481,12 +481,30 @@ Do not include any text before or after the JSON."""
                 "pr_number": pr_number,
                 "report": report[:500]
             })
+            # WSI Training Data — save security audit
+            try:
+                from wsi_training import save_training_data
+                save_training_data("security_audits", f"PR_{pr_number}", {
+                    "pr_number": pr_number, "repo": check_repo,
+                    "verdict": "FAIL",
+                }, report)
+            except Exception:
+                pass
             return False, report, True
         
         log_security_event("security_scan_passed", {
             "pr_number": pr_number,
             "report": report[:200]
         })
+        # WSI Training Data — save security audit
+        try:
+            from wsi_training import save_training_data
+            save_training_data("security_audits", f"PR_{pr_number}", {
+                "pr_number": pr_number, "repo": check_repo,
+                "verdict": "PASS",
+            }, report)
+        except Exception:
+            pass
         return True, report, True
         
     except Exception as e:
