@@ -803,27 +803,28 @@ def save_pr_rate_limits(data):
 def check_review_rate_limit(pr_number):
     """
     Check if a PR has exceeded AI review limits.
-    Returns (allowed, reason) tuple.
+    Returns (allowed, reason, should_close) tuple.
+    should_close=True when max reviews exhausted (PR will be auto-closed).
     """
     limits = load_pr_rate_limits()
     pr_key = str(pr_number)
     
     if pr_key not in limits:
-        return True, None
+        return True, None, False
     
     pr_data = limits[pr_key]
     review_count = pr_data.get("count", 0)
     last_review = pr_data.get("last_review")
     
-    # Check max reviews per PR
+    # Check max reviews per PR — auto-close
     if review_count >= MAX_REVIEWS_PER_PR:
         return False, (
-            f"## ⛔ Review Limit Reached\n\n"
-            f"This PR has used all **{MAX_REVIEWS_PER_PR}** AI reviews.\n\n"
-            f"To get a fresh review, please **close this PR and open a new one** "
-            f"with your fixes applied.\n\n"
+            f"## ⛔ Review Limit Reached — PR Auto-Closed\n\n"
+            f"This PR has used all **{MAX_REVIEWS_PER_PR}** AI reviews without passing.\n\n"
+            f"This PR has been **automatically closed**. To try again, please "
+            f"open a new PR with your fixes applied.\n\n"
             f"— WattCoin Automated Review"
-        )
+        ), True
     
     # Check cooldown
     if last_review:
@@ -841,11 +842,11 @@ def check_review_rate_limit(pr_number):
                     f"Please wait **{mins}m {secs}s** before the next AI review.\n\n"
                     f"Reviews remaining for this PR: **{MAX_REVIEWS_PER_PR - review_count}**/{MAX_REVIEWS_PER_PR}\n\n"
                     f"— WattCoin Automated Review"
-                )
+                ), False
         except (ValueError, TypeError):
             pass
     
-    return True, None
+    return True, None, False
 
 def record_review(pr_number):
     """Record that an AI review was performed for a PR."""
@@ -1605,10 +1606,19 @@ def handle_pr_review_trigger(pr_number, action):
         return jsonify({"message": "Duplicate bounty claim rejected", "issue": issue_number}), 200
     
     # === AI REVIEW RATE LIMIT GATE ===
-    allowed, rate_limit_msg = check_review_rate_limit(pr_number)
+    allowed, rate_limit_msg, should_close = check_review_rate_limit(pr_number)
     if not allowed:
         post_github_comment(pr_number, rate_limit_msg)
-        print(f"[RATE-LIMIT] PR #{pr_number} — AI review blocked by rate limit", flush=True)
+        if should_close:
+            # Auto-close PR when all reviews exhausted
+            try:
+                close_url = f"https://api.github.com/repos/{REPO}/pulls/{pr_number}"
+                req.patch(close_url, headers=github_headers(), json={"state": "closed"}, timeout=10)
+                print(f"[RATE-LIMIT] PR #{pr_number} — auto-closed (all {MAX_REVIEWS_PER_PR} reviews used)", flush=True)
+            except Exception as e:
+                print(f"[RATE-LIMIT] PR #{pr_number} — failed to auto-close: {e}", flush=True)
+        else:
+            print(f"[RATE-LIMIT] PR #{pr_number} — AI review blocked by cooldown", flush=True)
         return jsonify({"message": "Rate limited", "pr": pr_number}), 200
     
     # Post initial comment
