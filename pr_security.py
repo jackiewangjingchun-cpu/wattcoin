@@ -407,12 +407,6 @@ SCAN DIMENSIONS (evaluate each explicitly):
 Be strict — if in doubt, FAIL. False positives are better than letting malicious code through.
 Only PASS if the code is clearly benign across ALL dimensions.
 
-TRAINING CONTEXT: Your evaluation will be used as labeled training data for a self-improving code intelligence model (WSI). To maximize training signal quality:
-- Be explicit about your reasoning for EVERY dimension. Do not give surface-level assessments.
-- Name specific code patterns you checked and explain WHY they are safe or dangerous.
-- If a dimension is not applicable, explain why (e.g., "no network calls in diff").
-- Your reasoning is as valuable as your verdict — "PASS: looks fine" teaches nothing.
-
 Respond ONLY with valid JSON:
 {{
   "verdict": "PASS",
@@ -485,30 +479,12 @@ Do not include any text before or after the JSON."""
                 "pr_number": pr_number,
                 "report": report[:500]
             })
-            # WSI Training Data — save security audit
-            try:
-                from wsi_training import save_training_data
-                save_training_data("security_audits", f"PR_{pr_number}", {
-                    "pr_number": pr_number, "repo": check_repo,
-                    "verdict": "FAIL",
-                }, report)
-            except Exception:
-                pass
             return False, report, True
         
         log_security_event("security_scan_passed", {
             "pr_number": pr_number,
             "report": report[:200]
         })
-        # WSI Training Data — save security audit
-        try:
-            from wsi_training import save_training_data
-            save_training_data("security_audits", f"PR_{pr_number}", {
-                "pr_number": pr_number, "repo": check_repo,
-                "verdict": "PASS",
-            }, report)
-        except Exception:
-            pass
         return True, report, True
         
     except Exception as e:
@@ -546,4 +522,5 @@ def verify_github_signature(payload_body, signature_header, secret):
     calculated_signature = mac.hexdigest()
     
     return hmac.compare_digest(calculated_signature, expected_signature)
+
 

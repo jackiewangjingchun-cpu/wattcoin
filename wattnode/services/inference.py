@@ -2,11 +2,11 @@
 WattNode Inference Service
 Supports two backends:
   - Ollama (local, lightweight, CPU-friendly)
-  - Petals (distributed P2P swarm via WSI gateway, GPU recommended)
+  - Distributed (P2P swarm via WSI gateway, GPU recommended)
 
 Backend selection via config or environment:
-  INFERENCE_BACKEND=auto|ollama|petals (default: auto)
-  Auto: tries Petals gateway first, falls back to Ollama.
+  INFERENCE_BACKEND=auto|ollama|distributed (default: auto)
+  Auto: tries distributed gateway first, falls back to Ollama.
 
 Version: 2.0.0
 """
@@ -21,18 +21,18 @@ logger = logging.getLogger("wattnode.inference")
 # CONFIG
 # =============================================================================
 
-INFERENCE_BACKEND = os.environ.get("INFERENCE_BACKEND", "auto")  # auto|ollama|petals
+INFERENCE_BACKEND = os.environ.get("INFERENCE_BACKEND", "auto")  # auto|ollama|distributed
 
 # Ollama
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama2")
 OLLAMA_TIMEOUT = 120
 
-# Petals gateway (runs on seed node alongside Petals server)
-PETALS_GATEWAY_URL = os.environ.get("PETALS_GATEWAY_URL", "http://localhost:8090")
-PETALS_GATEWAY_KEY = os.environ.get("WSI_GATEWAY_KEY", "")
-PETALS_MODEL = os.environ.get("PETALS_MODEL", "meta-llama/Meta-Llama-3.1-8B-Instruct")
-PETALS_TIMEOUT = 180  # Distributed inference can be slower
+# Distributed inference gateway (runs on seed node alongside inference server)
+DISTRIBUTED_GATEWAY_URL = os.environ.get("DISTRIBUTED_GATEWAY_URL", os.environ.get("PETALS_GATEWAY_URL", "http://localhost:8090"))
+DISTRIBUTED_GATEWAY_KEY = os.environ.get("WSI_GATEWAY_KEY", "")
+DISTRIBUTED_MODEL = os.environ.get("DISTRIBUTED_MODEL", os.environ.get("PETALS_MODEL", "meta-llama/Meta-Llama-3.1-8B-Instruct"))
+DISTRIBUTED_TIMEOUT = 180  # Distributed inference can be slower
 
 
 # =============================================================================
@@ -98,16 +98,16 @@ class OllamaBackend:
 
 
 # =============================================================================
-# PETALS BACKEND
+# DISTRIBUTED BACKEND
 # =============================================================================
 
-class PetalsBackend:
-    """Distributed inference via Petals gateway (HTTP wrapper around Petals client)."""
+class DistributedBackend:
+    """Distributed inference via WSI gateway (HTTP wrapper around inference client)."""
 
     def __init__(self, gateway_url=None, gateway_key=None, default_model=None):
-        self.gateway_url = gateway_url or PETALS_GATEWAY_URL
-        self.gateway_key = gateway_key or PETALS_GATEWAY_KEY
-        self.default_model = default_model or PETALS_MODEL
+        self.gateway_url = gateway_url or DISTRIBUTED_GATEWAY_URL
+        self.gateway_key = gateway_key or DISTRIBUTED_GATEWAY_KEY
+        self.default_model = default_model or DISTRIBUTED_MODEL
 
     def _headers(self):
         headers = {"Content-Type": "application/json"}
@@ -116,7 +116,7 @@ class PetalsBackend:
         return headers
 
     def is_available(self):
-        """Check if Petals gateway is reachable."""
+        """Check if distributed gateway is reachable."""
         try:
             resp = requests.get(
                 f"{self.gateway_url}/health",
@@ -131,7 +131,7 @@ class PetalsBackend:
             return False
 
     def list_models(self):
-        """List models available on the Petals swarm."""
+        """List models available on the distributed swarm."""
         try:
             resp = requests.get(
                 f"{self.gateway_url}/models",
@@ -157,7 +157,7 @@ class PetalsBackend:
             return None
 
     def generate(self, prompt, model=None, max_tokens=500, temperature=0.7):
-        """Run inference through the Petals distributed swarm."""
+        """Run inference through the distributed swarm."""
         model = model or self.default_model
         try:
             resp = requests.post(
@@ -169,7 +169,7 @@ class PetalsBackend:
                     "max_tokens": max_tokens,
                     "temperature": temperature
                 },
-                timeout=PETALS_TIMEOUT
+                timeout=DISTRIBUTED_TIMEOUT
             )
             resp.raise_for_status()
             data = resp.json()
@@ -179,7 +179,7 @@ class PetalsBackend:
                     "success": True,
                     "response": data.get("response", ""),
                     "model": data.get("model", model),
-                    "backend": "petals",
+                    "backend": "distributed",
                     "tokens_generated": data.get("tokens_generated", 0),
                     "generation_time": data.get("generation_time", 0),
                     "node_id": data.get("node_id", ""),
@@ -189,9 +189,9 @@ class PetalsBackend:
                 return {"success": False, "error": data.get("error", "Unknown gateway error")}
 
         except requests.ConnectionError:
-            return {"success": False, "error": f"Cannot connect to Petals gateway at {self.gateway_url}"}
+            return {"success": False, "error": f"Cannot connect to distributed gateway at {self.gateway_url}"}
         except requests.Timeout:
-            return {"success": False, "error": f"Petals inference timed out after {PETALS_TIMEOUT}s"}
+            return {"success": False, "error": f"Distributed inference timed out after {DISTRIBUTED_TIMEOUT}s"}
         except Exception as e:
             return {"success": False, "error": str(e)}
 
@@ -205,8 +205,8 @@ def get_backend(backend=None):
     backend = backend or INFERENCE_BACKEND
     if backend == "ollama":
         return OllamaBackend()
-    elif backend == "petals":
-        return PetalsBackend()
+    elif backend in ("distributed", "petals"):
+        return DistributedBackend()
     else:  # auto
         return None  # Handled by generate()
 
@@ -215,42 +215,42 @@ def generate(prompt, model=None, max_tokens=500, temperature=0.7, backend=None):
     """
     Run inference through the best available backend.
 
-    Auto mode: tries Petals first, falls back to Ollama.
+    Auto mode: tries distributed gateway first, falls back to Ollama.
     Returns dict with 'success', 'response', 'backend', etc.
     """
     backend_name = backend or INFERENCE_BACKEND
 
-    if backend_name == "petals":
-        return PetalsBackend().generate(prompt, model=model, max_tokens=max_tokens, temperature=temperature)
+    if backend_name in ("distributed", "petals"):
+        return DistributedBackend().generate(prompt, model=model, max_tokens=max_tokens, temperature=temperature)
 
     if backend_name == "ollama":
         return OllamaBackend().generate(prompt, model=model, max_tokens=max_tokens, temperature=temperature)
 
-    # Auto: try Petals first, fall back to Ollama
-    petals = PetalsBackend()
-    if petals.is_available():
-        logger.info("Using Petals backend (gateway reachable)")
-        result = petals.generate(prompt, model=model, max_tokens=max_tokens, temperature=temperature)
+    # Auto: try distributed first, fall back to Ollama
+    distributed = DistributedBackend()
+    if distributed.is_available():
+        logger.info("Using distributed backend (gateway reachable)")
+        result = distributed.generate(prompt, model=model, max_tokens=max_tokens, temperature=temperature)
         if result.get("success"):
             return result
-        logger.warning(f"Petals failed: {result.get('error')} — falling back to Ollama")
+        logger.warning(f"Distributed backend failed: {result.get('error')} — falling back to Ollama")
 
     ollama = OllamaBackend()
     if ollama.is_available():
         logger.info("Using Ollama backend (local)")
         return ollama.generate(prompt, model=model, max_tokens=max_tokens, temperature=temperature)
 
-    return {"success": False, "error": "No inference backend available (Petals gateway down, Ollama not running)"}
+    return {"success": False, "error": "No inference backend available (distributed gateway down, Ollama not running)"}
 
 
 def check_available():
     """Check if any inference backend is available."""
-    if INFERENCE_BACKEND == "petals":
-        return PetalsBackend().is_available()
+    if INFERENCE_BACKEND in ("distributed", "petals"):
+        return DistributedBackend().is_available()
     if INFERENCE_BACKEND == "ollama":
         return OllamaBackend().is_available()
     # Auto: either works
-    return PetalsBackend().is_available() or OllamaBackend().is_available()
+    return DistributedBackend().is_available() or OllamaBackend().is_available()
 
 
 # =============================================================================
@@ -289,14 +289,14 @@ if __name__ == "__main__":
     print(f"Inference backend: {INFERENCE_BACKEND}")
     print()
 
-    # Check Petals
-    petals = PetalsBackend()
-    print(f"Petals gateway ({petals.gateway_url}):")
-    if petals.is_available():
+    # Check distributed
+    distributed = DistributedBackend()
+    print(f"Distributed gateway ({dist.gateway_url}):")
+    if distributed.is_available():
         print("  ✅ Reachable")
-        models = petals.list_models()
+        models = dist.list_models()
         print(f"  Models: {models}")
-        swarm = petals.get_swarm_status()
+        swarm = dist.get_swarm_status()
         if swarm:
             print(f"  Swarm: {swarm.get('total_nodes', '?')} nodes, {swarm.get('total_blocks', '?')} blocks")
     else:
@@ -327,3 +327,4 @@ if __name__ == "__main__":
             print(f"Response: {result['response']}")
         else:
             print(f"Error: {result['error']}")
+

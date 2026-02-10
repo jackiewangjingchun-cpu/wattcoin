@@ -1,6 +1,6 @@
 # WattNode Inference Requirements (WSI Phase 1)
 # NOTE: These are installed by the GUI setup wizard automatically.
-# Only install manually if running the Petals gateway without the GUI.
+# Only install manually if running the inference gateway without the GUI.
 #
 # Install with: pip install -r requirements_inference.txt
 #
@@ -20,7 +20,8 @@ torchvision>=0.16.0
 transformers>=4.36.0
 
 # Distributed inference across multiple nodes
-petals>=2.3.0
+petals>=2.3.0  # P2P inference engine
 
 # GPU memory optimization
 accelerate>=0.25.0
+

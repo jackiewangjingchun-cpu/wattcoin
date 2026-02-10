@@ -53,13 +53,6 @@ Body:
 
 Existing Labels: {labels}
 
-TRAINING CONTEXT: Your evaluation will be used as labeled training data for a self-improving code intelligence model (WSI). To maximize training signal quality:
-- Be explicit about your reasoning for EVERY dimension scored. Do not give surface-level assessments.
-- Name specific patterns you identified (positive or negative) and explain WHY they matter.
-- When scoring, explain what would move the score higher or lower.
-- If you detect novel approaches or techniques, call them out explicitly.
-- Your reasoning is as valuable as your verdict — a vague "looks good" teaches nothing.
-
 Respond ONLY with valid JSON in this exact format:
 {{
   "decision": "APPROVE",
@@ -87,7 +80,6 @@ def evaluate_bounty_request(issue_title, issue_body, existing_labels=[]):
     
     Returns:
         dict with keys: decision, score, amount, reasoning, suggested_title,
-        plus WSI training data: confidence, dimensions, novel_patterns, flags
     """
     if not AI_API_KEY:
         return {
@@ -123,19 +115,6 @@ def evaluate_bounty_request(issue_title, issue_body, existing_labels=[]):
         result = parse_ai_bounty_response(ai_output)
         result["raw_output"] = ai_output
         
-        # WSI Training Data — save evaluation for future fine-tuning
-        try:
-            from wsi_training import save_training_data
-            save_training_data("bounty_evaluations", f"issue_{issue_title[:30]}", {
-                "issue_title": issue_title,
-                "decision": result.get("decision"),
-                "score": result.get("score"),
-                "amount": result.get("amount"),
-                "labels": existing_labels,
-            }, ai_output)
-        except Exception:
-            pass
-
         return result
         
     except Exception as e:
@@ -166,7 +145,6 @@ def parse_ai_bounty_response(output):
             "amount": int(parsed.get("bounty_amount", 0)),
             "reasoning": parsed.get("summary", ""),
             "suggested_title": parsed.get("suggested_title", ""),
-            # WSI training data
             "confidence": parsed.get("confidence", "UNKNOWN"),
             "dimensions": parsed.get("dimensions", {}),
             "novel_patterns": parsed.get("novel_patterns", []),
@@ -213,3 +191,4 @@ def parse_ai_bounty_response(output):
         result["suggested_title"] = title_match.group(1).strip()
     
     return result
+

@@ -204,13 +204,6 @@ STRICT SCORING RULES:
 A score of 9 or higher passes initial review (subject to human approval).
 Be strict. This is a live production system handling real cryptocurrency payments.
 
-TRAINING CONTEXT: Your evaluation will be used as labeled training data for a self-improving code intelligence model (WSI). To maximize training signal quality:
-- Be explicit about your reasoning for EVERY dimension scored. Do not give surface-level assessments.
-- Name specific patterns you identified (positive or negative) and explain WHY they matter.
-- When scoring, explain what would move the score higher or lower.
-- If you detect novel approaches or techniques, call them out explicitly.
-- Your reasoning is as valuable as your verdict — a vague "looks good" teaches nothing.
-
 Respond ONLY with valid JSON in this exact format:
 {{
   "pass": true/false,
@@ -333,22 +326,6 @@ def call_ai_review(pr_data, security_warnings):
         review.setdefault("novel_patterns", [])
         review.setdefault("suggested_changes", [])
         review.setdefault("concerns", [])
-        
-        # WSI Training Data — save review for future fine-tuning
-        try:
-            from wsi_training import save_training_data
-            save_training_data("pr_reviews_public", f"PR_{pr_data.get('number')}", {
-                "pr_number": pr_data.get("number"),
-                "author": pr_data.get("user", {}).get("login"),
-                "title": pr_data.get("title"),
-                "score": review["score"],
-                "passed": review["pass"],
-                "confidence": review["confidence"],
-                "had_security_warnings": len(security_warnings) > 0
-            }, result_text)
-        except Exception as e:
-            # Don't fail the review if training data save fails
-            print(f"[PR-REVIEW] WSI training save failed: {e}", flush=True)
         
         return review, None
         
@@ -606,4 +583,5 @@ def review_pr():
         "remaining_prs": remaining - 1,
         "comment_posted": comment_posted
     }), 200
+
 

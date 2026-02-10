@@ -128,7 +128,6 @@ from api_webhooks import webhooks_bp, process_payment_queue, load_reputation_dat
 from api_wsi import wsi_bp
 from api_swarmsolve import swarmsolve_bp
 from data_backup import backup_bp
-from wsi_replay import wsi_replay_bp
 app.register_blueprint(admin_bp)
 app.register_blueprint(bounties_bp)
 app.register_blueprint(llm_bp)
@@ -140,7 +139,6 @@ app.register_blueprint(webhooks_bp)
 app.register_blueprint(wsi_bp)
 app.register_blueprint(swarmsolve_bp)
 app.register_blueprint(backup_bp)
-app.register_blueprint(wsi_replay_bp)
 
 # Apply endpoint-specific rate limits after blueprint registration
 limiter.limit("10 per minute")(llm_bp)  # LLM queries are expensive - strict limit
@@ -1475,6 +1473,7 @@ def bounty_stats():
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 

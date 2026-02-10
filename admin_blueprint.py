@@ -567,15 +567,6 @@ How does this change affect the broader WattCoin ecosystem? Does it improve the 
 - Removing existing functionality without replacement = score ≤5
 - N/A dimensions don't count against overall score
 
-TRAINING CONTEXT: Your evaluation will be used as labeled training data for a self-improving code intelligence model (WSI). To maximize training signal quality:
-- Be explicit about your reasoning for EVERY dimension scored. Do not give surface-level assessments.
-- Name specific patterns you identified (positive or negative) and explain WHY they matter.
-- When scoring, explain what would move the score higher or lower.
-- If you detect novel approaches or techniques, call them out explicitly.
-- Reference specific WattCoin architectural patterns when relevant (e.g., "follows fail-closed principle" or "breaks queue-based payment ordering").
-- Note any improvements that could benefit OTHER parts of the codebase — cross-pollination insights are high-value training signal.
-- Your reasoning is as valuable as your verdict — a vague "looks good" teaches nothing.
-
 Respond ONLY with valid JSON:
 {{
   "pass": true,
@@ -3237,6 +3228,7 @@ def api_ban_user(username):
     _save_banned_users(data)
     
     return jsonify({"success": True, "message": f"Banned {username}", "banned": data["banned"]})
+
 
 
 

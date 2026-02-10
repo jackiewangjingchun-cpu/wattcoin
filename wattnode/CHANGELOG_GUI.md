@@ -7,17 +7,17 @@
 **Serve AI Inference** — Earn WATT by hosting AI model layers on the WSI distributed network.
 
 #### Inference Tab Features:
-- **System Requirements Check** — One-click scan for GPU, RAM, disk, and Petals availability
+- **System Requirements Check** — One-click scan for GPU, RAM, disk, and inference engine availability
   - Detects NVIDIA GPU model and VRAM
   - Calculates how many model blocks your GPU can serve
   - Shows clear ✅/❌ status for each requirement
-- **Setup Wizard** — Automated Petals dependency installation
-  - Installs PyTorch, Transformers, Petals (~3GB total)
+- **Setup Wizard** — Automated inference engine dependency installation
+  - Installs PyTorch, Transformers, and inference engine (~3GB total)
   - Progress bar with step-by-step status messages
   - Clear labeling of what each package does
   - Retry button on failure
 - **Serve Toggle** — Start/stop hosting model layers with one click
-  - Launches Petals server in background process
+  - Launches inference server in background process
   - Live status: Starting → Loading Model → Serving
   - Automatic block allocation based on GPU VRAM
 - **Activity Log** — Real-time log of server events
@@ -26,7 +26,7 @@
   - Error messages with helpful context
 
 #### Architecture:
-- Uses Petals (bigscience-workshop/petals) for distributed inference
+- Uses distributed P2P inference engine for decentralized model serving
 - Node joins P2P swarm, hosts subset of model transformer blocks
 - Queries route through all nodes to produce responses
 - Node operators earn WATT proportional to blocks served
@@ -39,10 +39,10 @@
 
 ### Other Changes
 - Version bump: v2.0 → v3.0
-- Added `services/petals_node.py` — Petals server wrapper with GPU detection
-- Added `services/petals_gateway.py` — HTTP gateway for Railway API integration
+- Added `services/node_service.py` — Inference server wrapper with GPU detection
+- Added `services/inference_gateway.py` — HTTP gateway for API integration
 - Added `requirements_inference.txt` — Inference-specific dependencies
-- Updated `config.example.yaml` with Petals configuration section
+- Updated `config.example.yaml` with inference engine configuration section
 
 ---
 
@@ -91,3 +91,4 @@
 - **Neon green accents** (#39ff14)
 - **Clean typography** (Segoe UI / Consolas)
 - **Responsive layout** - Resizable window
+
