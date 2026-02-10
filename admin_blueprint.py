@@ -1944,7 +1944,7 @@ API_KEYS_TEMPLATE = """
         <div class="mt-4 p-4 bg-gray-800 rounded-lg">
             <p class="text-sm text-gray-400 mb-2"><strong>User Usage (share with key recipients):</strong></p>
             <code class="text-xs bg-gray-700 px-3 py-2 rounded block overflow-x-auto">
-                curl -X POST https://wattcoin-production-81a7.up.railway.app/api/v1/scrape \<br>
+                curl -X POST https://your-backend-url/api/v1/scrape \<br>
                 &nbsp;&nbsp;-H "X-API-Key: your-key-here" \<br>
                 &nbsp;&nbsp;-H "Content-Type: application/json" \<br>
                 &nbsp;&nbsp;-d '{"url": "https://example.com", "format": "text"}'
@@ -3237,6 +3237,7 @@ def api_ban_user(username):
     _save_banned_users(data)
     
     return jsonify({"success": True, "message": f"Banned {username}", "banned": data["banned"]})
+
 
 
 

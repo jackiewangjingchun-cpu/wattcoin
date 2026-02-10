@@ -63,7 +63,7 @@ from scraper_errors import (
 )
 
 app = Flask(__name__)
-app.secret_key = os.getenv("SECRET_KEY", "wattcoin-dev-key-change-in-prod")
+app.secret_key = os.getenv("SECRET_KEY", "")
 
 # =============================================================================
 # LOGGING
@@ -79,12 +79,10 @@ if not logger.handlers:
     ))
     logger.addHandler(_handler)
 
-# CORS - allow wattcoin.org and local dev
+# CORS - allow wattcoin.org
 CORS(app, origins=[
     "https://wattcoin.org",
-    "https://www.wattcoin.org",
-    "http://localhost:5173",
-    "http://localhost:3000"
+    "https://www.wattcoin.org"
 ])
 
 # =============================================================================
@@ -163,7 +161,7 @@ logger.info("Blueprint-specific rate limits applied successfully")
 # =============================================================================
 AI_API_KEY = os.getenv("AI_API_KEY")
 CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY")
-PROXY_SECRET = os.getenv("PROXY_SECRET", "wattcoin-proxy-secret-change-me")
+PROXY_SECRET = os.getenv("PROXY_SECRET", "")
 
 if not AI_API_KEY or not CLAUDE_API_KEY:
     print("WARNING: Set AI_API_KEY and CLAUDE_API_KEY environment variables")
@@ -1477,5 +1475,6 @@ def bounty_stats():
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
