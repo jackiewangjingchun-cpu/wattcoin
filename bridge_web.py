@@ -131,6 +131,7 @@ from api_wsi import wsi_bp
 from api_swarmsolve import swarmsolve_bp
 from data_backup import backup_bp
 from internal_pipeline import internal_bp
+from wsi_replay import wsi_replay_bp
 app.register_blueprint(admin_bp)
 app.register_blueprint(bounties_bp)
 app.register_blueprint(llm_bp)
@@ -143,6 +144,7 @@ app.register_blueprint(wsi_bp)
 app.register_blueprint(swarmsolve_bp)
 app.register_blueprint(backup_bp)
 app.register_blueprint(internal_bp)
+app.register_blueprint(wsi_replay_bp)
 
 # Apply endpoint-specific rate limits after blueprint registration
 limiter.limit("10 per minute")(llm_bp)  # LLM queries are expensive - strict limit
