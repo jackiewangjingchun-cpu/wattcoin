@@ -333,6 +333,22 @@ def call_ai_review(pr_data, security_warnings):
         review.setdefault("suggested_changes", [])
         review.setdefault("concerns", [])
         
+        # WSI Training Data — save review for future fine-tuning
+        try:
+            from wsi_training import save_training_data
+            save_training_data("pr_reviews_public", f"PR_{pr_data.get('number')}", {
+                "pr_number": pr_data.get("number"),
+                "author": pr_data.get("user", {}).get("login"),
+                "title": pr_data.get("title"),
+                "score": review["score"],
+                "passed": review["pass"],
+                "confidence": review["confidence"],
+                "had_security_warnings": len(security_warnings) > 0
+            }, result_text)
+        except Exception as e:
+            # Don't fail the review if training data save fails
+            print(f"[PR-REVIEW] WSI training save failed: {e}", flush=True)
+        
         return review, None
         
     except json.JSONDecodeError as e:
