@@ -1,102 +1,149 @@
 """
-WSI Training Data Storage — Phase B
-Saves AI evaluation outputs as labeled training data for future WSI fine-tuning.
-
-Signal types:
-  - pr_reviews_public     (from call_ai_review on public repo)
-  - pr_reviews_internal   (from call_ai_review on internal repo)
-  - bounty_evaluations    (from evaluate_bounty_request)
-  - security_audits       (from ai_security_scan_pr)
-  - swarmsolve_audits     (from safety_scan_pr)
-  - task_verifications    (from ai_verify_submission)
-
-Storage: data/wsi_training/{signal_type}/{timestamp}_{identifier}.json
-
-Version: 1.0.0
+WSI Training Data Storage Module
+Saves AI evaluation outputs for future WSI model fine-tuning
 """
 
 import os
 import json
-import re
-from datetime import datetime, timezone
+from datetime import datetime
+
+# Base directory for all WSI training data
+WSI_TRAINING_DIR = "data/wsi_training"
+
+# Category subdirectories
+CATEGORIES = {
+    "pr_reviews_public": "pr_reviews_public",
+    "pr_reviews_internal": "pr_reviews_internal",
+    "bounty_evaluations": "bounty_evaluations",
+    "security_audits": "security_audits",
+    "swarmsolve_audits": "swarmsolve_audits",
+    "task_verifications": "task_verifications"
+}
 
 
-DATA_DIR = os.getenv("DATA_DIR", "/app/data")
-WSI_TRAINING_DIR = os.path.join(DATA_DIR, "wsi_training")
-
-VALID_SIGNAL_TYPES = [
-    "pr_reviews_public",
-    "pr_reviews_internal",
-    "bounty_evaluations",
-    "security_audits",
-    "swarmsolve_audits",
-    "task_verifications",
-]
-
-
-def save_training_data(signal_type, identifier, metadata, ai_response):
+def save_training_data(category, identifier, metadata, ai_output):
     """
-    Save an AI evaluation as WSI training data. Fire-and-forget — never raises.
-
+    Save AI evaluation output as WSI training data.
+    
     Args:
-        signal_type: One of VALID_SIGNAL_TYPES
-        identifier:  Short ID string (e.g., "PR_42", "issue_15", "task_abc")
-        metadata:    Dict with context (contributor, repo, outcome, etc.)
-        ai_response: Raw AI output string OR parsed dict
+        category: One of the CATEGORIES keys (e.g., "pr_reviews_public")
+        identifier: Unique identifier for this evaluation (e.g., "PR_123", "issue_fix_bug")
+        metadata: Dict with evaluation context (pr_number, decision, score, etc.)
+        ai_output: Raw AI response text (string)
+    
+    Returns:
+        filepath: Path where data was saved, or None if failed
     """
     try:
-        if signal_type not in VALID_SIGNAL_TYPES:
-            print(f"[WSI-TRAIN] Invalid signal_type: {signal_type}", flush=True)
-            return
-
-        # Ensure directory exists
-        signal_dir = os.path.join(WSI_TRAINING_DIR, signal_type)
-        os.makedirs(signal_dir, exist_ok=True)
-
-        # Build filename: 20260209T031500Z_PR_42.json
-        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        safe_id = re.sub(r"[^a-zA-Z0-9_-]", "_", str(identifier))[:50]
-        filename = f"{ts}_{safe_id}.json"
-        filepath = os.path.join(signal_dir, filename)
-
-        # Parse ai_response if it's a string (try JSON extraction)
-        parsed_response = None
-        raw_response = ai_response if isinstance(ai_response, str) else None
-
-        if isinstance(ai_response, dict):
-            parsed_response = ai_response
-            raw_response = json.dumps(ai_response)
-        elif isinstance(ai_response, str):
-            try:
-                json_text = ai_response.strip()
-                if json_text.startswith("```"):
-                    json_text = json_text.split("\n", 1)[1] if "\n" in json_text else json_text[3:]
-                    if json_text.endswith("```"):
-                        json_text = json_text[:-3]
-                    json_text = json_text.strip()
-                parsed_response = json.loads(json_text)
-            except (json.JSONDecodeError, ValueError):
-                pass  # Keep raw only
-
-        # Build training record
-        record = {
-            "version": "1.0",
-            "signal_type": signal_type,
-            "identifier": str(identifier),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "metadata": metadata or {},
-            "raw_response": raw_response,
-            "parsed_response": parsed_response,
+        # Validate category
+        if category not in CATEGORIES:
+            print(f"[WSI-TRAINING] Invalid category '{category}' — skipping save", flush=True)
+            return None
+        
+        # Create category directory
+        category_dir = os.path.join(WSI_TRAINING_DIR, CATEGORIES[category])
+        os.makedirs(category_dir, exist_ok=True)
+        
+        # Generate timestamped filename
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        # Sanitize identifier (remove special chars)
+        safe_identifier = "".join(c for c in identifier if c.isalnum() or c in "_-")[:50]
+        filename = f"{timestamp}_{safe_identifier}.json"
+        filepath = os.path.join(category_dir, filename)
+        
+        # Combine metadata + AI output
+        training_record = {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "category": category,
+            "identifier": identifier,
+            "metadata": metadata,
+            "ai_output": ai_output
         }
-
-        # Write atomically (write to tmp, rename)
-        tmp_path = filepath + ".tmp"
-        with open(tmp_path, "w") as f:
-            json.dump(record, f, indent=2, default=str)
-        os.replace(tmp_path, filepath)
-
-        print(f"[WSI-TRAIN] Saved {signal_type}/{filename} ({len(raw_response or '')} chars)", flush=True)
-
+        
+        # Save to file
+        with open(filepath, 'w') as f:
+            json.dump(training_record, f, indent=2)
+        
+        print(f"[WSI-TRAINING] Saved: {category}/{filename}", flush=True)
+        return filepath
+        
     except Exception as e:
-        # Never break the calling flow
-        print(f"[WSI-TRAIN] Error saving {signal_type}/{identifier}: {e}", flush=True)
+        print(f"[WSI-TRAINING] Failed to save {category}/{identifier}: {e}", flush=True)
+        return None
+
+
+def load_training_data(category=None, limit=None):
+    """
+    Load training data for analysis or model training.
+    
+    Args:
+        category: Optional category to filter (None = all categories)
+        limit: Optional max number of files to load (None = all)
+    
+    Returns:
+        list of training records
+    """
+    records = []
+    
+    try:
+        if category:
+            if category not in CATEGORIES:
+                print(f"[WSI-TRAINING] Invalid category '{category}'", flush=True)
+                return []
+            categories = [category]
+        else:
+            categories = CATEGORIES.keys()
+        
+        for cat in categories:
+            category_dir = os.path.join(WSI_TRAINING_DIR, CATEGORIES[cat])
+            if not os.path.exists(category_dir):
+                continue
+            
+            files = sorted(os.listdir(category_dir), reverse=True)  # Newest first
+            if limit:
+                files = files[:limit]
+            
+            for filename in files:
+                if not filename.endswith('.json'):
+                    continue
+                
+                filepath = os.path.join(category_dir, filename)
+                try:
+                    with open(filepath, 'r') as f:
+                        record = json.load(f)
+                        records.append(record)
+                except Exception as e:
+                    print(f"[WSI-TRAINING] Failed to load {filepath}: {e}", flush=True)
+        
+        return records
+        
+    except Exception as e:
+        print(f"[WSI-TRAINING] Load error: {e}", flush=True)
+        return []
+
+
+def get_training_stats():
+    """
+    Get statistics about accumulated training data.
+    
+    Returns:
+        dict with counts per category and total
+    """
+    stats = {"total": 0}
+    
+    try:
+        for category, subdir in CATEGORIES.items():
+            category_dir = os.path.join(WSI_TRAINING_DIR, subdir)
+            if not os.path.exists(category_dir):
+                stats[category] = 0
+                continue
+            
+            count = len([f for f in os.listdir(category_dir) if f.endswith('.json')])
+            stats[category] = count
+            stats["total"] += count
+        
+        return stats
+        
+    except Exception as e:
+        print(f"[WSI-TRAINING] Stats error: {e}", flush=True)
+        return {"total": 0, "error": str(e)}
