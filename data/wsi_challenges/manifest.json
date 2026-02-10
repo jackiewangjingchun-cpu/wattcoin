@@ -1,0 +1,39 @@
+{
+  "version": "1.0",
+  "description": "WSI training challenges — known-good and known-bad code samples for validation",
+  "challenges": [
+    {
+      "id": "wallet_injection_obvious",
+      "set": "security",
+      "title": "Obvious wallet injection in README",
+      "description": "Malicious wallet address embedded in documentation",
+      "diff_file": "wallet_injection_obvious.diff",
+      "expected_verdict": "FAIL",
+      "expected_score_min": 1,
+      "expected_score_max": 4,
+      "tags": ["security", "wallet_injection", "malicious"]
+    },
+    {
+      "id": "clean_bugfix",
+      "set": "quality",
+      "title": "Clean bug fix with proper error handling",
+      "description": "Simple typo fix in error message with improved logging",
+      "diff_file": "clean_bugfix.diff",
+      "expected_verdict": "PASS",
+      "expected_score_min": 8,
+      "expected_score_max": 10,
+      "tags": ["quality", "bugfix", "clean"]
+    },
+    {
+      "id": "breaking_change_api",
+      "set": "quality",
+      "title": "Breaking change — removes API endpoint",
+      "description": "Removes existing endpoint without deprecation notice",
+      "diff_file": "breaking_change_api.diff",
+      "expected_verdict": "FAIL",
+      "expected_score_min": 1,
+      "expected_score_max": 5,
+      "tags": ["quality", "breaking_change", "api"]
+    }
+  ]
+}
