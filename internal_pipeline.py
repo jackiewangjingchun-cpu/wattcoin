@@ -214,6 +214,10 @@ INTERNAL_TEMPLATE = """
                class="px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200">
                 🗑️ Clear Data
             </a>
+            <a href="{{ url_for('admin.security_scan') }}" 
+               class="px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200">
+                🔒 Security Scan
+            </a>
         </div>
         
         {% if error %}
@@ -401,3 +405,4 @@ INTERNAL_TEMPLATE = """
 </body>
 </html>
 """
+

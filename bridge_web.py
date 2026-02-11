@@ -216,6 +216,34 @@ def _periodic_wsi_payout():
 threading.Thread(target=_periodic_wsi_payout, daemon=True).start()
 print(f"[STARTUP] WSI payout timer scheduled (every {WSI_PAYOUT_INTERVAL}s)", flush=True)
 
+# Periodic security scan — runs once daily at configured hour (UTC)
+SECURITY_SCAN_HOUR = int(os.environ.get('SECURITY_SCAN_HOUR', '3'))  # UTC hour, default 3 AM
+
+def _periodic_security_scan():
+    """Run full repo security scan daily at scheduled hour."""
+    import time
+    from datetime import datetime, timezone, timedelta
+    time.sleep(120)  # Initial delay — let startup finish
+    while True:
+        try:
+            now = datetime.now(timezone.utc)
+            # Calculate next run time
+            target = now.replace(hour=SECURITY_SCAN_HOUR, minute=0, second=0, microsecond=0)
+            if target <= now:
+                target += timedelta(days=1)
+            wait_seconds = (target - now).total_seconds()
+            print(f"[SECURITY-SCAN] Next scheduled scan in {wait_seconds/3600:.1f}h at {target.strftime('%H:%M UTC')}", flush=True)
+            time.sleep(wait_seconds)
+            # Run scan
+            from security_scanner import scheduled_scan
+            scheduled_scan()
+        except Exception as e:
+            print(f"[SECURITY-SCAN] Cron error: {e}", flush=True)
+            time.sleep(3600)  # Wait 1hr on error before retrying
+
+threading.Thread(target=_periodic_security_scan, daemon=True).start()
+print(f"[STARTUP] Security scan cron scheduled (daily at {SECURITY_SCAN_HOUR}:00 UTC)", flush=True)
+
 # =============================================================================
 # SCRAPER CONFIG (v0.1)
 # =============================================================================

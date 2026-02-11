@@ -728,6 +728,10 @@ DASHBOARD_TEMPLATE = """
                class="px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200">
                 🗑️ Clear Data
             </a>
+            <a href="{{ url_for('admin.security_scan') }}" 
+               class="px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200">
+                🔒 Security Scan
+            </a>
         </div>
         
         {% if message %}
@@ -1760,6 +1764,10 @@ API_KEYS_TEMPLATE = """
                class="px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200">
                 🗑️ Clear Data
             </a>
+            <a href="{{ url_for('admin.security_scan') }}" 
+               class="px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200">
+                🔒 Security Scan
+            </a>
         </div>
         
         {% if message %}
@@ -2385,6 +2393,10 @@ CLEAR_DATA_HTML = """
                class="px-4 py-2 text-sm font-medium border-b-2 border-green-400 text-green-400">
                 🗑️ Clear Data
             </a>
+            <a href="{{ url_for('admin.security_scan') }}" 
+               class="px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200">
+                🔒 Security Scan
+            </a>
         </div>
         
         {% if message %}
@@ -2518,6 +2530,10 @@ SUBMISSIONS_HTML = """
             <a href="{{ url_for('admin.clear_data') }}" 
                class="px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200">
                 🗑️ Clear Data
+            </a>
+            <a href="{{ url_for('admin.security_scan') }}" 
+               class="px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200">
+                🔒 Security Scan
             </a>
         </div>
         
@@ -3206,3 +3222,346 @@ def api_ban_user(username):
 
 
 
+
+
+
+# =============================================================================
+# SECURITY SCAN
+# =============================================================================
+
+SECURITY_SCAN_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Security Scan - WattCoin Admin</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .finding-critical { border-left: 3px solid #ef4444; }
+        .finding-high { border-left: 3px solid #f97316; }
+        .finding-medium { border-left: 3px solid #eab308; }
+        .finding-low { border-left: 3px solid #6b7280; }
+        .severity-critical { color: #ef4444; }
+        .severity-high { color: #f97316; }
+        .severity-medium { color: #eab308; }
+        .severity-low { color: #6b7280; }
+        .spin { animation: spin 1s linear infinite; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+    <div class="max-w-6xl mx-auto p-6">
+        <!-- Header -->
+        <div class="flex justify-between items-center mb-4">
+            <div>
+                <h1 class="text-2xl font-bold text-green-400">⚡ WattCoin Admin</h1>
+                <p class="text-gray-500 text-sm">Security Scanner v1.0.0 | Full Repository Scan</p>
+            </div>
+            <a href="{{ url_for('admin.logout') }}" class="text-gray-400 hover:text-red-400 text-sm">Logout</a>
+        </div>
+        
+        <!-- Nav Tabs -->
+        <div class="flex gap-1 mb-6 border-b border-gray-700">
+            <a href="{{ url_for('admin.dashboard') }}" 
+               class="px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200">
+                🎯 PR Bounties
+            </a>
+            <a href="{{ url_for('admin.submissions') }}" 
+               class="px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200">
+                📋 Agent Tasks
+            </a>
+            <a href="{{ url_for('internal.internal_page') }}" 
+               class="px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200">
+                🔧 Internal Pipeline
+            </a>
+            <a href="{{ url_for('admin.api_keys') }}" 
+               class="px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200">
+                🔑 Scraper Keys
+            </a>
+            <a href="{{ url_for('admin.clear_data') }}" 
+               class="px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200">
+                🗑️ Clear Data
+            </a>
+            <a href="{{ url_for('admin.security_scan') }}" 
+               class="px-4 py-2 text-sm font-medium border-b-2 border-green-400 text-green-400">
+                🔒 Security Scan
+            </a>
+        </div>
+
+        <!-- Scan Controls -->
+        <div class="flex items-center gap-4 mb-6">
+            <button id="scan-btn" onclick="runScan()" 
+                    class="bg-green-600 hover:bg-green-500 text-white px-6 py-2 rounded-lg font-medium transition">
+                🔍 Run Scan Now
+            </button>
+            <div id="scan-status" class="text-sm text-gray-400"></div>
+        </div>
+
+        <!-- Results Banner -->
+        <div id="results-banner" class="hidden mb-6 px-4 py-3 rounded-lg"></div>
+
+        <!-- Last Scan Info -->
+        <div id="scan-info" class="grid grid-cols-4 gap-4 mb-6">
+            <div class="bg-gray-800 rounded-lg p-4">
+                <div class="text-xs text-gray-500 mb-1">Last Scan</div>
+                <div id="info-time" class="text-sm font-medium text-gray-300">Never</div>
+            </div>
+            <div class="bg-gray-800 rounded-lg p-4">
+                <div class="text-xs text-gray-500 mb-1">Files Scanned</div>
+                <div id="info-files" class="text-sm font-medium text-gray-300">—</div>
+            </div>
+            <div class="bg-gray-800 rounded-lg p-4">
+                <div class="text-xs text-gray-500 mb-1">Patterns Checked</div>
+                <div id="info-patterns" class="text-sm font-medium text-gray-300">—</div>
+            </div>
+            <div class="bg-gray-800 rounded-lg p-4">
+                <div class="text-xs text-gray-500 mb-1">Duration</div>
+                <div id="info-duration" class="text-sm font-medium text-gray-300">—</div>
+            </div>
+        </div>
+
+        <!-- Severity Summary -->
+        <div id="severity-summary" class="hidden grid grid-cols-4 gap-4 mb-6">
+            <div class="bg-gray-800 rounded-lg p-4 border-l-4 border-red-500">
+                <div class="text-xs text-gray-500 mb-1">Critical</div>
+                <div id="sev-critical" class="text-2xl font-bold text-red-400">0</div>
+            </div>
+            <div class="bg-gray-800 rounded-lg p-4 border-l-4 border-orange-500">
+                <div class="text-xs text-gray-500 mb-1">High</div>
+                <div id="sev-high" class="text-2xl font-bold text-orange-400">0</div>
+            </div>
+            <div class="bg-gray-800 rounded-lg p-4 border-l-4 border-yellow-500">
+                <div class="text-xs text-gray-500 mb-1">Medium</div>
+                <div id="sev-medium" class="text-2xl font-bold text-yellow-400">0</div>
+            </div>
+            <div class="bg-gray-800 rounded-lg p-4 border-l-4 border-gray-500">
+                <div class="text-xs text-gray-500 mb-1">Low</div>
+                <div id="sev-low" class="text-2xl font-bold text-gray-400">0</div>
+            </div>
+        </div>
+
+        <!-- Findings List -->
+        <div id="findings-container" class="hidden">
+            <h2 class="text-lg font-medium text-gray-300 mb-4">Findings by File</h2>
+            <div id="findings-list" class="space-y-3"></div>
+        </div>
+
+        <!-- Clean State -->
+        <div id="clean-state" class="hidden text-center py-12">
+            <div class="text-6xl mb-4">✅</div>
+            <div class="text-xl font-medium text-green-400">Repository Clean</div>
+            <div class="text-gray-500 mt-2">No security findings detected</div>
+        </div>
+
+        <!-- No Scan State -->
+        <div id="no-scan-state" class="text-center py-12">
+            <div class="text-6xl mb-4">🔒</div>
+            <div class="text-xl font-medium text-gray-400">No Scan Results</div>
+            <div class="text-gray-500 mt-2">Run a scan to check the public repo for leaked secrets, vendor references, and PII</div>
+        </div>
+
+        <!-- Cron Info -->
+        <div class="mt-8 p-4 bg-gray-800/50 rounded-lg">
+            <div class="text-xs text-gray-500">
+                <strong>Scheduled Scan:</strong> Runs daily at {{ scan_hour }}:00 UTC — results appear here automatically.
+                Scan checks {{ pattern_count }} patterns across all text files in the public repo.
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function formatTime(isoStr) {
+            if (!isoStr) return 'Never';
+            const d = new Date(isoStr);
+            const now = new Date();
+            const diffMin = Math.floor((now - d) / 60000);
+            if (diffMin < 1) return 'Just now';
+            if (diffMin < 60) return diffMin + 'm ago';
+            if (diffMin < 1440) return Math.floor(diffMin/60) + 'h ago';
+            return Math.floor(diffMin/1440) + 'd ago';
+        }
+
+        function renderResults(data) {
+            if (!data) {
+                document.getElementById('no-scan-state').classList.remove('hidden');
+                return;
+            }
+
+            document.getElementById('no-scan-state').classList.add('hidden');
+
+            // Info cards
+            document.getElementById('info-time').textContent = formatTime(data.timestamp);
+            document.getElementById('info-files').textContent = (data.files_scanned || 0) + ' / ' + (data.files_total || 0);
+            document.getElementById('info-patterns').textContent = data.patterns_checked || '—';
+            document.getElementById('info-duration').textContent = (data.duration_seconds || 0) + 's';
+
+            // Error state
+            if (data.status === 'error') {
+                const banner = document.getElementById('results-banner');
+                banner.className = 'mb-6 px-4 py-3 rounded-lg bg-red-900/50 border border-red-500 text-red-300';
+                banner.textContent = '⚠️ Scan error: ' + (data.error || 'Unknown error');
+                banner.classList.remove('hidden');
+                return;
+            }
+
+            // Severity summary
+            const sev = data.severity_counts || {};
+            document.getElementById('sev-critical').textContent = sev.critical || 0;
+            document.getElementById('sev-high').textContent = sev.high || 0;
+            document.getElementById('sev-medium').textContent = sev.medium || 0;
+            document.getElementById('sev-low').textContent = sev.low || 0;
+
+            const totalFindings = data.findings_total || 0;
+
+            if (totalFindings > 0) {
+                document.getElementById('severity-summary').classList.remove('hidden');
+                document.getElementById('findings-container').classList.remove('hidden');
+                document.getElementById('clean-state').classList.add('hidden');
+
+                // Banner
+                const banner = document.getElementById('results-banner');
+                if (sev.critical > 0) {
+                    banner.className = 'mb-6 px-4 py-3 rounded-lg bg-red-900/50 border border-red-500 text-red-300';
+                    banner.textContent = '🚨 ' + totalFindings + ' finding(s) — ' + (sev.critical || 0) + ' critical';
+                } else if (sev.high > 0) {
+                    banner.className = 'mb-6 px-4 py-3 rounded-lg bg-orange-900/50 border border-orange-500 text-orange-300';
+                    banner.textContent = '⚠️ ' + totalFindings + ' finding(s) — review recommended';
+                } else {
+                    banner.className = 'mb-6 px-4 py-3 rounded-lg bg-yellow-900/50 border border-yellow-500 text-yellow-300';
+                    banner.textContent = '⚡ ' + totalFindings + ' finding(s) — low/medium severity';
+                }
+                banner.classList.remove('hidden');
+
+                // Render findings by file
+                const container = document.getElementById('findings-list');
+                container.innerHTML = '';
+                const byFile = data.findings_by_file || {};
+                
+                for (const [filepath, findings] of Object.entries(byFile)) {
+                    const fileDiv = document.createElement('div');
+                    fileDiv.className = 'bg-gray-800 rounded-lg overflow-hidden';
+                    
+                    const header = document.createElement('button');
+                    header.className = 'w-full flex justify-between items-center px-4 py-3 hover:bg-gray-750 transition text-left';
+                    header.innerHTML = '<span class="font-mono text-sm text-gray-300">' + filepath + '</span>' +
+                        '<span class="text-xs text-gray-500">' + findings.length + ' finding(s) ▼</span>';
+                    
+                    const body = document.createElement('div');
+                    body.className = 'hidden border-t border-gray-700';
+                    body.id = 'file-' + filepath.replace(/[^a-zA-Z0-9]/g, '_');
+                    
+                    header.onclick = function() {
+                        body.classList.toggle('hidden');
+                        const arrow = header.querySelector('span:last-child');
+                        arrow.textContent = body.classList.contains('hidden') 
+                            ? findings.length + ' finding(s) ▼' 
+                            : findings.length + ' finding(s) ▲';
+                    };
+
+                    findings.forEach(function(f) {
+                        const row = document.createElement('div');
+                        row.className = 'px-4 py-2 border-b border-gray-700/50 finding-' + f.severity;
+                        row.innerHTML = '<div class="flex items-center gap-3 mb-1">' +
+                            '<span class="text-xs font-medium severity-' + f.severity + ' uppercase">' + f.severity + '</span>' +
+                            '<span class="text-xs text-gray-400">Line ' + f.line + '</span>' +
+                            '<span class="text-xs text-gray-500">' + f.pattern_name + '</span>' +
+                            '</div>' +
+                            '<div class="font-mono text-xs text-gray-400 bg-gray-900 px-2 py-1 rounded overflow-x-auto">' + 
+                            escapeHtml(f.content) + '</div>';
+                        body.appendChild(row);
+                    });
+
+                    fileDiv.appendChild(header);
+                    fileDiv.appendChild(body);
+                    container.appendChild(fileDiv);
+                }
+            } else {
+                document.getElementById('severity-summary').classList.add('hidden');
+                document.getElementById('findings-container').classList.add('hidden');
+                document.getElementById('clean-state').classList.remove('hidden');
+                
+                const banner = document.getElementById('results-banner');
+                banner.className = 'mb-6 px-4 py-3 rounded-lg bg-green-900/50 border border-green-500 text-green-300';
+                banner.textContent = '✅ Repository clean — no findings';
+                banner.classList.remove('hidden');
+            }
+        }
+
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        async function loadLatest() {
+            try {
+                const resp = await fetch('{{ url_for("admin.api_security_scan_latest") }}');
+                const data = await resp.json();
+                if (data) renderResults(data);
+            } catch(e) {
+                console.error('Failed to load scan results:', e);
+            }
+        }
+
+        async function runScan() {
+            const btn = document.getElementById('scan-btn');
+            const status = document.getElementById('scan-status');
+            
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spin inline-block">⏳</span> Scanning...';
+            btn.className = 'bg-gray-600 text-gray-300 px-6 py-2 rounded-lg font-medium cursor-wait';
+            status.textContent = 'Scanning public repo — this may take 30-60 seconds...';
+
+            try {
+                const resp = await fetch('{{ url_for("admin.api_security_scan_run") }}', {method: 'POST'});
+                const data = await resp.json();
+                renderResults(data);
+                status.textContent = 'Scan complete';
+            } catch(e) {
+                status.textContent = 'Scan failed: ' + e.message;
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '🔍 Run Scan Now';
+                btn.className = 'bg-green-600 hover:bg-green-500 text-white px-6 py-2 rounded-lg font-medium transition';
+            }
+        }
+
+        // Load latest results on page load
+        loadLatest();
+    </script>
+</body>
+</html>
+"""
+
+
+@admin_bp.route('/security-scan')
+@login_required
+def security_scan():
+    """Security scan dashboard page."""
+    scan_hour = os.getenv("SECURITY_SCAN_HOUR", "3")
+    from security_scanner import SCAN_PATTERNS
+    return render_template_string(SECURITY_SCAN_TEMPLATE,
+        scan_hour=scan_hour,
+        pattern_count=len(SCAN_PATTERNS)
+    )
+
+
+@admin_bp.route('/api/security-scan', methods=['POST'])
+@login_required
+def api_security_scan_run():
+    """Trigger a full repo security scan."""
+    from security_scanner import run_full_scan
+    result = run_full_scan()
+    return jsonify(result)
+
+
+@admin_bp.route('/api/security-scan/latest')
+@login_required
+def api_security_scan_latest():
+    """Return latest stored scan results."""
+    from security_scanner import load_latest_results
+    result = load_latest_results()
+    if result:
+        return jsonify(result)
+    return jsonify(None)
